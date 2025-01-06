@@ -17,8 +17,8 @@ app.use(express.json());
 app.use(cors());
 
 app.use(cors({
-    // origin:  "https://computer-coou.vercel.app"
-    origin: "http://localhost:3000"
+    origin:  "https://computer-coou.vercel.app"
+    // origin: "http://localhost:3000"
 
 }));
 
@@ -28,7 +28,7 @@ app.use(cors({
 // })
 
 app.get("/", (req, res) => {
-    res.status(200).json("Hello Mafia");
+    res.send("Hello Mafia");
 })
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

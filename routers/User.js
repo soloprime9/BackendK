@@ -28,8 +28,12 @@ router.post('/add', async (req, res) => {
     const {username, email, password} = req.body;
   try{
     const checkuser = await User.findOne({username});
-    if(checkuser && checkuser.email) {
-       return res.status(404).json({message: "Your username and Email Already Exists"});
+    if(checkuser) {
+       return res.status(404).json({message: "username Already Exists"});
+    }
+    checkEmail = await User.findOne({email});
+    if(checkEmail){
+        return res.status(404).json({message: "Email Already Exists"});
     }
     const  UserDetail = await new User(req.body).save();
       res.status(200).json({message: "Your Account Successfully Created", UserDetail});
@@ -37,7 +41,8 @@ router.post('/add', async (req, res) => {
 
     }
     catch(error){
-       return res.status(500).json(error);
+        res.status(500).json({message: "Internal Server Error"});
+       console.log(error)
     }
 })
 
@@ -45,15 +50,16 @@ router.post("/login", async (req, res) => {
    const {email, password} = req.body;
    const user = await User.findOne({email});
    if(!user){
-    return res.status(404).json("Email And Password Not Found");
+    return res.status(404).json({message:"Email Not Found, Try Again"});
+   }
+   if(user.password !== password){
+    return res.status(404).json({message: "Wrong Password, Try Again"});
    }
 
-  
-   
    
    const token = jwt.sign({UserId: user._id}, process.env.JWT_SECRET, {expiresIn: "1h"} )
    console.log("token:", token);
-   return res.status(200).json({UserDetail: user,token: token});
+   return res.status(200).json({UserDetail: user,token: token, message:"Loggin Successfull"});
 
    
 

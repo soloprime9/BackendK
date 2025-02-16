@@ -19,6 +19,8 @@ app.use(cors());
 app.use(cors({
     origin:  "https://computer-xrfg.vercel.app"
     // origin: "http://localhost:3000"
+    methods: "GET, POST, PUT, DELETE",
+  allowedHeaders: "Content-Type, Authorization"
 
 }));
 

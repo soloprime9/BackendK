@@ -6,11 +6,4 @@
   "routes": [
     { "src": "/(.*)", "dest": "server.js" }
   ]
-},
-{
-  "functions": {
-    "api/upload.js": {
-      "maxDuration": 30
-    }
-  }
 }

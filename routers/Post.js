@@ -62,7 +62,7 @@ router.post("/uploader", upload.single("file"), async (req, res) => {
 // Upload Route
 router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
     
-        const title = req.body.title;
+        const {title, publicId} = req.body;
         const UserId = req.user.UserId;
         const user = await User.findById(UserId);
         if (!user) {
@@ -74,30 +74,39 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
                 return res.status(400).json({ success: false, message: "No file uploaded" });
             }
 
-            const PromiseTimeOut = new Promise((resolve, reject) => {
-              setTimeout(() => {
-                    reject(new Error("Time Out"));
-              }, 25000);
-            });
+            // const PromiseTimeOut = new Promise((resolve, reject) => {
+            //   setTimeout(() => {
+            //         reject(new Error("Time Out"));
+            //   }, 25000);
+            // });
     
-            // Upload Image to Cloudinary
-            const UploadPromise = new Promise ((resolve, reject ) => {
+            // // Upload Image to Cloudinary
+            // const UploadPromise = new Promise ((resolve, reject ) => {
                 
-            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) => error ? reject(error) : resolve(result));
+            // const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) => error ? reject(error) : resolve(result));
                 
-            stream.end(req.file.buffer);
-            });
+            // stream.end(req.file.buffer);
+            // });
 
-            const uploadResult = await Promise.race([UploadPrmomise, PromiseTimeOut]);
+            // const uploadResult = await Promise.race([UploadPrmomise, PromiseTimeOut]);
     
                 // Extracting User ID (from JWT token or request body)
                 // const userId = req.user.id || req.body.userId; // Adjust based on your JWT implementation
-    
+
+            const asset = await cloudinary.api.resource({publicId});
+            if(!asset) {
+                return res.status(400).json({message: "Invalid Media"})
+                       }
+            
                 // Creating a New Post in MongoDB
                 const newPost = new Post({
                     userId: UserId,
                     title: req.body.title,
-                    media: uploadResult.secure_url, // Store Cloudinary URL
+                    media: {
+                        public_id: publicId,
+                        url: asset.secure-url,
+                        type: asset.resource-type,
+                    }
                     tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
                     likes: [],
                     comments: [],
@@ -111,7 +120,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
     
         } catch (error) {
             console.error("Server Error:", error);
-            res.status(500).json({ success: false, message: error.message.includes('timeout') ? "Time Out - Try Small File to Upload" : "Upload Failed" });
+            res.status(500).json({ success: false, message: "Upload Failed" });
         }
     });
     

@@ -71,13 +71,20 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
             if (!req.file) {
                 return res.status(400).json({ success: false, message: "No file uploaded" });
             }
+
+            const PromiseTimeOut = await Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Time Out")), 25000);
+            );
     
             // Upload Image to Cloudinary
-            cloudinary.uploader.upload_stream({ resource_type: "auto" }, async (error, uploadResult) => {
-                if (error) {
-                    console.error("Cloudinary Upload Error:", error);
-                    return res.status(500).json({ success: false, message: "Upload failed", error });
-                }
+            const UploadPromise = await Promise ((resolve, reject ) => {
+                
+            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) = error ? reject(error) : resolve(result);
+                );
+            stream.end(req.file.buffer);
+            });
+
+            const uploadResult = await Promise.race([UploadPrmomise, PromiseTimeOut]);
     
                 // Extracting User ID (from JWT token or request body)
                 // const userId = req.user.id || req.body.userId; // Adjust based on your JWT implementation
@@ -100,7 +107,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
     
         } catch (error) {
             console.error("Server Error:", error);
-            res.status(500).json({ success: false, message: "Internal server error", error });
+            res.status(500).json({ success: false, message: error.message.includes('timeout') ? : "Time Out - Try Small File to Upload" : "Upload Failed" });
         }
     });
     

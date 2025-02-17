@@ -72,9 +72,11 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
                 return res.status(400).json({ success: false, message: "No file uploaded" });
             }
 
-            const PromiseTimeOut = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error("Time Out")), 25000);
-            );
+            const PromiseTimeOut = new Promise((resolve, reject) => {
+              setTimeout(() => {
+                    reject(new Error("Time Out"));
+              }, 25000);
+            });
     
             // Upload Image to Cloudinary
             const UploadPromise = new Promise ((resolve, reject ) => {

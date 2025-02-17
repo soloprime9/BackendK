@@ -1,66 +1,9 @@
-{
-  "version": 2,
-  "builds": [
-    {
-      "src": "*.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "client/**",
-      "use": "@vercel/next",
-      "config": { 
-        "distDir": "build",
-        "includeFiles": ["public/**"]
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1",
-      "methods": ["GET", "POST", "PUT", "DELETE"],
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-        "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, Authorization, x-auth-token"
-      }
-    },
-    {
-      "src": "/post/upload",
-      "dest": "/api/postRoutes.js",
-      "methods": ["POST"]
-    },
-    {
-      "src": "/auth/(.*)",
-      "dest": "/api/authRoutes.js"
-    },
-    {
-      "src": "/users?(.*)",
-      "dest": "/api/userRoutes.js"
-    },
-    {
-      "src": "/static/(.*)",
-      "dest": "/public/static/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/client/build/$1",
-      "headers": {
-        "Cache-Control": "s-maxage=31536000, stale-while-revalidate"
-      }
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/client/build/index.html"
-    }
-  ],
-  "env": {
-    "MONGODB_URI": "@your_mongodb_uri",
-    "JWT_SECRET": "@your_jwt_secret",
-    "CLOUDINARY_CLOUD_NAME": "@your_cloudinary_name",
-    "CLOUDINARY_API_KEY": "@your_cloudinary_key",
-    "CLOUDINARY_API_SECRET": "@your_cloudinary_secret"
-  }
+ {
+"version": 2,
+"builds": [
+{ "src": "server.js", "use": "@vercel/node" }
+],
+"routes": [
+{ "src": "/(.*)", "dest": "server.js" }
+]
 }

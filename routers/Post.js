@@ -107,7 +107,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
                         public_id: publicId,
                         url: asset.secure-url,
                         type: asset.resource-type,
-                    }
+                    },
                     tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
                     likes: [],
                     comments: [],

@@ -22,9 +22,11 @@ console.log({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Multer Storage for File Uploads (Memory Storage for Buffer)
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+router.get("/signature", async(req, res) => {
+    const timeStamp = Math.round(Date.now() / 1000);
+    const signature = cloudinary.utils.api_sign_request({timeStamp, upload_preset: process.env.CLOUDINARY_UPLOAD_PRESET}, process.env.CLOUDINARY_API_SECRET);
+    res.json({ timeStamp, signature, api_key: process.env.CLOUDINARY_API_KEY});
+})
 
 // API Endpoint for Image Upload
 router.post("/uploader", upload.single("file"), async (req, res) => {

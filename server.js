@@ -17,11 +17,12 @@ app.use(express.json());
 app.use(cors());
 
 app.use(cors({
-    origin: ['https://computer-xrfg.vercel.app'],
+  origin: ['https://computer-xrfg.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token']
-
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token'],
+  credentials: true
 }));
+
 
 
 // server.listen(4000, ()=> {

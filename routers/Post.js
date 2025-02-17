@@ -105,7 +105,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
     
                 res.status(200).json({ success: true, message: "Upload successful", post: newPost });
                 console.log("Success:", newPost);
-            }).end(req.file.buffer); // End the stream properly
+            
     
         } catch (error) {
             console.error("Server Error:", error);

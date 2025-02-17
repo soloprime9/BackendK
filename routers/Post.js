@@ -81,7 +81,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
             // Upload Image to Cloudinary
             const UploadPromise = new Promise ((resolve, reject ) => {
                 
-            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) = error ? reject(error) : resolve(result);
+            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) => error ? reject(error) : resolve(result);
                 );
             stream.end(req.file.buffer);
             });

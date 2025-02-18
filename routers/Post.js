@@ -27,7 +27,7 @@ console.log({
 router.get("/signature", async(req, res) => {
     const timeStamp = Math.round(Date.now() / 1000);
     const signature = cloudinary.utils.api_sign_request({timeStamp, upload_preset: process.env.CLOUDINARY_UPLOAD_PRESET}, process.env.CLOUDINARY_API_SECRET);
-    res.json({ timeStamp, signature, api_key: process.env.CLOUDINARY_API_KEY});
+    res.json({ timeStamp, signature, apiKey: process.env.CLOUDINARY_API_KEY, uploadPreset : process.env.CLOUDINARY_UPLOAD_PRESET,cloudName: process.env.CLOUDINARY_CLOUD_NAME});
 })
 
 // API Endpoint for Image Upload

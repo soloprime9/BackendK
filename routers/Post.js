@@ -25,9 +25,19 @@ console.log({
 });
 
 router.get("/signature", async(req, res) => {
-    const timeStamp = Math.round(Date.now() / 1000);
-    const signature = cloudinary.utils.api_sign_request({timeStamp, upload_preset: process.env.CLOUDINARY_UPLOAD_PRESET}, process.env.CLOUDINARY_API_SECRET);
-    res.json({ timeStamp, signature, apiKey: process.env.CLOUDINARY_API_KEY, uploadPreset : process.env.CLOUDINARY_UPLOAD_PRESET,cloudName: process.env.CLOUDINARY_CLOUD_NAME});
+    const timestamp = Math.round(Date.now() / 1000);
+const signature = cloudinary.utils.api_sign_request(
+    { timestamp, upload_preset: process.env.CLOUDINARY_UPLOAD_PRESET },
+    process.env.CLOUDINARY_API_SECRET
+);
+res.json({
+    timestamp,
+    signature,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    uploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET,
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+});
+
 })
 
 // API Endpoint for Image Upload
@@ -43,30 +53,16 @@ router.post("/upload",verifyToken, async (req, res) => {
         }
 
         try {
-            if (!req.file) {
-                return res.status(400).json({ success: false, message: "No file uploaded" });
-            }
+            if (!publicId) {
+    return res.status(400).json({ success: false, message: "No media uploaded" });
+}
 
-            // const PromiseTimeOut = new Promise((resolve, reject) => {
-            //   setTimeout(() => {
-            //         reject(new Error("Time Out"));
-            //   }, 25000);
-            // });
-    
-            // // Upload Image to Cloudinary
-            // const UploadPromise = new Promise ((resolve, reject ) => {
-                
-            // const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) => error ? reject(error) : resolve(result));
-                
-            // stream.end(req.file.buffer);
-            // });
 
-            // const uploadResult = await Promise.race([UploadPrmomise, PromiseTimeOut]);
     
                 // Extracting User ID (from JWT token or request body)
                 // const userId = req.user.id || req.body.userId; // Adjust based on your JWT implementation
 
-            const asset = await cloudinary.api.resource({publicId});
+            const asset = await cloudinary.api.resource(publicId);
             if(!asset) {
                 return res.status(400).json({message: "Invalid Media"})
                        }
@@ -77,7 +73,7 @@ router.post("/upload",verifyToken, async (req, res) => {
                     title: req.body.title,
                     media: {
                         public_id: publicId,
-                        url: asset.secure-url,
+                        url: asset.secure_url,
                         type: asset.resource-type,
                     },
                     tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),

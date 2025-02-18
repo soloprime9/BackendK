@@ -33,7 +33,7 @@ router.get("/signature", async(req, res) => {
 // API Endpoint for Image Upload
 
 // Upload Route
-router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
+router.post("/upload",verifyToken, async (req, res) => {
     
         const {title, publicId} = req.body;
         const UserId = req.user.UserId;

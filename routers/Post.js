@@ -48,58 +48,50 @@ res.json({
 // API Endpoint for Image Upload
 
 // Upload Route
-router.post("/upload",verifyToken, async (req, res) => {
-    
-        const {title, publicId} = req.body;
-    console.log(title, publicId);
-        const UserId = req.user.UserId;
-        const user = await User.findById(UserId);
-        if (!user) {
-            return res.status(404).json("User Not Found");
-        }
+router.post("/upload", verifyToken, async (req, res) => {
+  const { title, publicId } = req.body;
+  console.log("Received title and publicId:", title, publicId);
 
-        try {
-            if (!publicId) {
-    return res.status(400).json({ success: false, message: "No media uploaded" });
-}
+  const UserId = req.user.UserId;
+  const user = await User.findById(UserId);
+  if (!user) {
+    return res.status(404).json("User Not Found");
+  }
 
+  try {
+    if (!publicId) {
+      return res.status(400).json({ success: false, message: "No media uploaded" });
+    }
 
-    
-                // Extracting User ID (from JWT token or request body)
-                // const userId = req.user.id || req.body.userId; // Adjust based on your JWT implementation
+    const asset = await cloudinary.api.resource(publicId);
+    if (!asset) {
+      return res.status(400).json({ message: "Invalid Media" });
+    }
 
-            const asset = await cloudinary.api.resource(publicId);
-            if(!asset) {
-                return res.status(400).json({message: "Invalid Media"})
-                       }
-            
-                // Creating a New Post in MongoDB
-                const newPost = new Post({
-                    userId: UserId,
-                    title: req.body.title,
-                    media: asset.secure_url,
-                    medias: {
-                        public_id: publicId,
-                        url: asset.secure_url,
-                        type: asset.resource-type,
-                    },
-                    tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
-                    likes: [],
-                    comments: [],
-                });
-    
-                await newPost.save(); // Save post to MongoDB
-    
-                res.status(200).json({ success: true, message: "Upload successful", post: newPost });
-                console.log("Success:", newPost);
-            
-    
-        } catch (error) {
-            console.error("Server Error:", error);
-            res.status(500).json({ success: false, message: "Upload Failed" });
-        }
+    const newPost = new Post({
+      userId: UserId,
+      title: req.body.title,
+      media: asset.secure_url,
+      medias: {
+        public_id: publicId,
+        url: asset.secure_url,
+        type: asset.resource_type,
+      },
+      tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
+      likes: [],
+      comments: [],
     });
-    
+
+    await newPost.save(); // Save post to MongoDB
+    res.status(200).json({ success: true, message: "Upload successful", post: newPost });
+    console.log("Success:", newPost);
+
+  } catch (error) {
+    console.error("Server Error:", error);
+    res.status(500).json({ success: false, message: "Upload Failed" });
+  }
+});
+
 
 
 router.get("/mango/getall", async (req, res) => {

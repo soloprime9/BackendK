@@ -5,7 +5,12 @@ const PostSchema = Schema ({
     userId : {type: Schema.Types.ObjectId, ref: "User"},
     title: {type: String, default : ""},
     tags : [{type: String, trim: true}],
-    media: {type: String, required: true}, //Cloudary give Url
+    // media: {type: String, required: true}, //Cloudary give Url
+    media: {
+    public_id: String,
+    url: String,
+    type: String,
+  },
     // likes: [{type: String, default : 0}],
     likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
 

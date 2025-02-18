@@ -37,6 +37,11 @@ res.json({
     uploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET,
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,
 });
+    console.log(timestamp,
+    signature,
+    "apiKey: ", process.env.CLOUDINARY_API_KEY,
+    "uploadPreset: ", process.env.CLOUDINARY_UPLOAD_PRESET,
+    "cloudName: ", process.env.CLOUDINARY_CLOUD_NAME,)
 
 })
 

@@ -77,7 +77,8 @@ router.post("/upload",verifyToken, async (req, res) => {
                 const newPost = new Post({
                     userId: UserId,
                     title: req.body.title,
-                    media: {
+                    media: asset.secure_url,
+                    medias: {
                         public_id: publicId,
                         url: asset.secure_url,
                         type: asset.resource-type,

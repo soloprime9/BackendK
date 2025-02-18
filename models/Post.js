@@ -5,8 +5,8 @@ const PostSchema = Schema ({
     userId : {type: Schema.Types.ObjectId, ref: "User"},
     title: {type: String, default : ""},
     tags : [{type: String, trim: true}],
-    // media: {type: String, required: true}, //Cloudary give Url
-    media: {
+    media: {type: String, required: true}, //Cloudary give Url
+    medias: {
     public_id: String,
     url: String,
     type: String,

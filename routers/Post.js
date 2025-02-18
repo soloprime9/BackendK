@@ -51,6 +51,7 @@ res.json({
 router.post("/upload",verifyToken, async (req, res) => {
     
         const {title, publicId} = req.body;
+    console.log(title, publicId);
         const UserId = req.user.UserId;
         const user = await User.findById(UserId);
         if (!user) {

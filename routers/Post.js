@@ -31,35 +31,6 @@ router.get("/signature", async(req, res) => {
 })
 
 // API Endpoint for Image Upload
-router.post("/uploader", upload.single("file"), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: "No file uploaded" });
-        }
-
-        // Upload Image to Cloudinary
-        cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, uploadResult) => {
-            if (error) {
-                console.error("Cloudinary Upload Error:", error);
-                return res.status(500).json({ success: false, message: "Upload failed", error });
-            }
-
-            res.status(200).json({
-                success: true,
-                message: "Upload successful",
-                imageUrl: uploadResult.secure_url
-            });
-        }).end(req.file.buffer); // End the stream properly
-        
-
-    } catch (error) {
-        console.error("Server Error:", error);
-        res.status(500).json({ success: false, message: "Internal server error", error });
-    }
-});
-
-
-
 
 // Upload Route
 router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {

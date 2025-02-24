@@ -57,64 +57,62 @@ router.post("/uploader", upload.single("file"), async (req, res) => {
 
 
 
-// Upload Route
-router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
-
-        const title = req.body.title;
-        const UserId = req.user.UserId;
+router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
+    const title = req.body.title;
+    const UserId = req.user.UserId;
+    
+    try {
+        // ✅ Check if User Exists
         const user = await User.findById(UserId);
         if (!user) {
-            return res.status(404).json("User Not Found");
+            return res.status(404).json({ success: false, message: "User Not Found" });
         }
 
-        try {
-            if (!req.file) {
-                return res.status(400).json({ success: false, message: "No file uploaded" });
-            }
+        // ✅ Check if File is Uploaded
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No file uploaded" });
+        }
 
-            const PromiseTimeOut = new Promise((resolve, reject) => {
-              setTimeout(() => {
-                    reject(new Error("Time Out"));
-              }, 25000);
-            });
+        // ✅ Set Upload Timeout (25 Seconds)
+        const PromiseTimeOut = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("Time Out - Try Smaller File")), 25000);
+        });
 
-            // Upload Image to Cloudinary
-            const UploadPromise = new Promise ((resolve, reject ) => {
-
-            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) => error ? reject(error) : resolve(result));
-
+        // ✅ Upload to Cloudinary
+        const UploadPromise = new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" },
+                (error, result) => (error ? reject(error) : resolve(result))
+            );
             stream.end(req.file.buffer);
-            });
+        });
 
-            const uploadResult = await Promise.race([UploadPrmomise, PromiseTimeOut]);
+        // ✅ Wait for Cloudinary Upload (With Timeout Protection)
+        const uploadResult = await Promise.race([UploadPromise, PromiseTimeOut]);
 
-                // Extracting User ID (from JWT token or request body)
-                // const userId = req.user.id || req.body.userId; // Adjust based on your JWT implementation
+        // ✅ Create New Post in MongoDB
+        const newPost = new Post({
+            userId: UserId,
+            title: req.body.title,
+            media: uploadResult.secure_url, // ✅ Cloudinary URL
+            tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
+            likes: [],
+            comments: [],
+        });
 
-                // Creating a New Post in MongoDB
-                const newPost = new Post({
-                    userId: UserId,
-                    title: req.body.title,
-                    media: uploadResult.secure_url, // Store Cloudinary URL
-                    tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
-                    likes: [],
-                    comments: [],
-                });
+        await newPost.save(); // ✅ Save Post to MongoDB
 
-                await newPost.save(); // Save post to MongoDB
+        console.log("Upload Success:", newPost);
+        return res.status(200).json({ success: true, message: "Upload successful", post: newPost });
 
-                res.status(200).json({ success: true, message: "Upload successful", post: newPost });
-                console.log("Success:", newPost);
-
-
-        } catch (error) {
-            console.error("Server Error:", error);
-            res.status(500).json({ success: false, message: error.message.includes('timeout') ?  "Time Out - Try Small File to Upload" : "Upload Failed" });
-            res.status(500).json({ success: false, message: error.message.includes('timeout') ? "Time Out - Try Small File to Upload" : "Upload Failed" });
-        }
-    });
-
-
+    } catch (error) {
+        console.error("Upload Error:", error);
+        
+        return res.status(500).json({ 
+            success: false, 
+            message: error.message.includes("Time Out") ? "Time Out - Try Smaller File" : "Upload Failed"
+        });
+    }
+});
 
 
 router.get("/mango/getall", async (req, res) => {

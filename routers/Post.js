@@ -14,83 +14,106 @@ cloudinary.config({
 
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET 
-   
 });
 
 console.log({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET
-    
 });
 
-router.get("/signature", async(req, res) => {
-    const timestamp = Math.round(Date.now() / 1000);
-const signature = cloudinary.utils.api_sign_request(
-    { timestamp, upload_preset: process.env.CLOUDINARY_UPLOAD_PRESET },
-    process.env.CLOUDINARY_API_SECRET
-);
-res.json({
-    timestamp,
-    signature,
-    apiKey: process.env.CLOUDINARY_API_KEY,
-    uploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET,
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-});
-    console.log(timestamp,
-    signature,
-    "apiKey: ", process.env.CLOUDINARY_API_KEY,
-    "uploadPreset: ", process.env.CLOUDINARY_UPLOAD_PRESET,
-    "cloudName: ", process.env.CLOUDINARY_CLOUD_NAME,)
-
-})
+// Multer Storage for File Uploads (Memory Storage for Buffer)
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 // API Endpoint for Image Upload
+router.post("/uploader", upload.single("file"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No file uploaded" });
+        }
+
+        // Upload Image to Cloudinary
+        cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, uploadResult) => {
+            if (error) {
+                console.error("Cloudinary Upload Error:", error);
+                return res.status(500).json({ success: false, message: "Upload failed", error });
+            }
+
+            res.status(200).json({
+                success: true,
+                message: "Upload successful",
+                imageUrl: uploadResult.secure_url
+            });
+        }).end(req.file.buffer); // End the stream properly
+
+
+    } catch (error) {
+        console.error("Server Error:", error);
+        res.status(500).json({ success: false, message: "Internal server error", error });
+    }
+});
+
+
+
 
 // Upload Route
-router.post("/upload", verifyToken, async (req, res) => {
-  const { title, publicId } = req.body;
-  console.log("Received title and publicId:", title, publicId);
+router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
 
-  const UserId = req.user.UserId;
-  const user = await User.findById(UserId);
-  if (!user) {
-    return res.status(404).json("User Not Found");
-  }
+        const title = req.body.title;
+        const UserId = req.user.UserId;
+        const user = await User.findById(UserId);
+        if (!user) {
+            return res.status(404).json("User Not Found");
+        }
 
-  try {
-    if (!publicId) {
-      return res.status(400).json({ success: false, message: "No media uploaded" });
-    }
+        try {
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: "No file uploaded" });
+            }
 
-    const asset = await cloudinary.api.resource(publicId);
-    if (!asset) {
-      return res.status(400).json({ message: "Invalid Media" });
-    }
+            const PromiseTimeOut = new Promise((resolve, reject) => {
+              setTimeout(() => {
+                    reject(new Error("Time Out"));
+              }, 25000);
+            });
 
-    const newPost = new Post({
-      userId: UserId,
-      title: req.body.title,
-      media: asset.secure_url,
-      medias: {
-        public_id: publicId,
-        url: asset.secure_url,
-        type: asset.resource_type,
-      },
-      tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
-      likes: [],
-      comments: [],
+            // Upload Image to Cloudinary
+            const UploadPromise = new Promise ((resolve, reject ) => {
+
+            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, result) => error ? reject(error) : resolve(result));
+
+            stream.end(req.file.buffer);
+            });
+
+            const uploadResult = await Promise.race([UploadPrmomise, PromiseTimeOut]);
+
+                // Extracting User ID (from JWT token or request body)
+                // const userId = req.user.id || req.body.userId; // Adjust based on your JWT implementation
+
+                // Creating a New Post in MongoDB
+                const newPost = new Post({
+                    userId: UserId,
+                    title: req.body.title,
+                    media: uploadResult.secure_url, // Store Cloudinary URL
+                    tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
+                    likes: [],
+                    comments: [],
+                });
+
+                await newPost.save(); // Save post to MongoDB
+
+                res.status(200).json({ success: true, message: "Upload successful", post: newPost });
+                console.log("Success:", newPost);
+
+
+        } catch (error) {
+            console.error("Server Error:", error);
+            res.status(500).json({ success: false, message: error.message.includes('timeout') ? : "Time Out - Try Small File to Upload" : "Upload Failed" });
+            res.status(500).json({ success: false, message: error.message.includes('timeout') ? "Time Out - Try Small File to Upload" : "Upload Failed" });
+        }
     });
 
-    await newPost.save(); // Save post to MongoDB
-    res.status(200).json({ success: true, message: "Upload successful", post: newPost });
-    console.log("Success:", newPost);
-
-  } catch (error) {
-    console.error("Server Error:", error);
-    res.status(500).json({ success: false, message: "Upload Failed" });
-  }
-});
 
 
 

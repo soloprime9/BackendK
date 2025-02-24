@@ -109,7 +109,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
 
         } catch (error) {
             console.error("Server Error:", error);
-            res.status(500).json({ success: false, message: error.message.includes('timeout') ? : "Time Out - Try Small File to Upload" : "Upload Failed" });
+            res.status(500).json({ success: false, message: error.message.includes('timeout') ?  "Time Out - Try Small File to Upload" : "Upload Failed" });
             res.status(500).json({ success: false, message: error.message.includes('timeout') ? "Time Out - Try Small File to Upload" : "Upload Failed" });
         }
     });

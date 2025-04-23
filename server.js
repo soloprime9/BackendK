@@ -4,9 +4,10 @@ const mongoose = require("mongoose");
 const jsonwebtoken = require("jsonwebtoken");
 const Post = require("./routers/Post");
 const User = require("./routers/User");
+const Content = require("./routers/content");
 const cors = require("cors") ;
 const path = require("path");
-const Content = require("./route/content");
+
 
 
 

@@ -6,6 +6,7 @@ const Post = require("./routers/Post");
 const User = require("./routers/User");
 const cors = require("cors") ;
 const path = require("path");
+const Content = require("./route/content");
 
 
 

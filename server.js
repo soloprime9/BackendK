@@ -38,6 +38,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use("/user", User);
 app.use("/post", Post);
+app.use("/content", Content);
+
 
 // app.listen(4000, console.log("This Program run on 4000 Port"));
 

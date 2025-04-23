@@ -26,6 +26,8 @@
     "nodemon": "^3.1.9",
     "socket.io": "^4.8.1",
     "uuid": "^11.0.3",
-    "vercel": "^28.18.5"
+    "vercel": "^28.18.5",
+    "@google/genai": "^0.8.0",
+    "@google/generative-ai": "^0.24.0"
   }
 }

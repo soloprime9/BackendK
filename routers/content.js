@@ -218,16 +218,20 @@ router.get("/search", async(req, res) => {
             
 
             const helloElement = newContent.map((item, index) => {
-                const image = filteredImages[index] || null; 
-                
-                return {
-                    content: item, 
-                    imageURL : image,
-                    unique: true,
-                }
-                }
+            let image = filteredImages[index] || null;
+        
+            // Fix the image URL if needed
+            if (image && !/^https?:\/\//i.test(image)) {
+                image = null; // If invalid URL, remove it
+            }
+        
+                    return {
+                        content: item, 
+                        imageURL: image,
+                        unique: true,
+                    };
+                });
 
-            );
 
             if(helloElement.length){
 

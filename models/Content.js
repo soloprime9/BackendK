@@ -13,6 +13,7 @@ const Content = Schema ({
             message: "Content must not be empty",
         },
     },
+    imageURL: {type: String},
     timestamp: {type: Date, default: Date.now}
 })
 

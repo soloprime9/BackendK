@@ -344,48 +344,48 @@ router.get("/get", async(req, res) => {
     
 })
 
-router.post("/create", async(req, res) => {
-    const content = req.body;
+// router.post("/create", async(req, res) => {
+//     const content = req.body;
 
-    if(hello){
-        console.log("hello dear", hello);
-    }
+//     if(hello){
+//         console.log("hello dear", hello);
+//     }
 
-    try{
+//     try{
 
         
-        if(hello.length>0){
+//         if(hello.length>0){
 
-            const existcontent = await Content.find({content: {$in : hello}}).distinct("content");
+//             const existcontent = await Content.find({content: {$in : hello}}).distinct("content");
 
-            const newContent = hello.filter((item) => !existcontent.includes(item));
+//             const newContent = hello.filter((item) => !existcontent.includes(item));
             
 
-            const helloElement = newContent.map((item) => ({content: item, unique: true}));
+//             const helloElement = newContent.map((item) => ({content: item, unique: true}));
 
-            if(helloElement.length){
+//             if(helloElement.length){
 
-                const detailupload = await Content.insertMany(helloElement);
+//                 const detailupload = await Content.insertMany(helloElement);
 
-                console.log(detailupload);
-                res.send(detailupload)
+//                 console.log(detailupload);
+//                 res.send(detailupload)
 
-            }
-            else{
-                res.send("Post Already available please, Try another to post")
-            }
+//             }
+//             else{
+//                 res.send("Post Already available please, Try another to post")
+//             }
 
-        }
+//         }
 
-        else{
-            res.send("please Try Again....")
-        }
+//         else{
+//             res.send("please Try Again....")
+//         }
         
-    }
-    catch(error){
-        console.log(error);
-    }
-})
+//     }
+//     catch(error){
+//         console.log(error);
+//     }
+// })
 
 
 router.get("/post/:id", async(req, res) =>{

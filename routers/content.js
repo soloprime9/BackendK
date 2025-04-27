@@ -200,7 +200,7 @@ router.get("/search", async(req, res) => {
           
     }
     catch(error){
-        console.log(error)
+        res.json(error);
     }
 
     if(hello){

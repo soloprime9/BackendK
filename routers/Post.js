@@ -146,6 +146,37 @@ router.delete("/delete/:postId", async (req, res) => {
 
 })
 
+
+router.get('/shorts', async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 5;
+  const skip = (page - 1) * limit;
+
+  try {
+    const total = await Post.countDocuments({ media: { $regex: /\.mp4$/i } });
+
+    const videos = await Post.find({ media: { $regex: /\.mp4$/i } })
+      .sort({ createdAt: -1 }) // assuming you have timestamps: true in schema
+      .skip(skip)
+      .limit(limit)
+      .populate('userId', 'username')
+      .populate('comments', 'userId')
+      .populate('likes', 'userId');
+
+    res.status(200).json({
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      videos,
+    });
+  } catch (error) {
+    console.error('Error fetching shorts:', error);
+    res.status(500).json({ message: 'Server error', error });
+  }
+});
+
+
 // router.post("/like/:postId", verifyToken, async(req, res) => {
     
 //     try{

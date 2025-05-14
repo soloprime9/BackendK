@@ -77,11 +77,25 @@ router.get("/search", async(req, res) => {
                 const title = $("title").text() || $("h1").text();
                 const content = $("article").text().trim() || $("p").text().trim().slice(0, 100);
 
+                const images = [];
+                $("img").each((index, element) => {
+                    let imageUrl = $(element).attr("src");
+
+                    // Handle relative URLs by converting them to absolute URLs
+                    if (imageUrl) {
+                        // If the image URL is relative, resolve it to an absolute URL
+                        if (!imageUrl.startsWith('http') && !imageUrl.startsWith('https')) {
+                            imageUrl = url.resolve(urlToScrape, imageUrl);
+                        }
+                        images.push(imageUrl);
+                    }
+                });
                 
                 ScrapedData.push({
                     url,
                     title,
-                    content: content || "No Content"
+                    content: content || "No Content",
+                    images
 
                 })
 

@@ -91,7 +91,7 @@ router.get("/result", async(req, res) => {
                     results
                 });
 
-                res.status(200).json("Scraping Success: ", ScrapedData);
+                res.status(200).json({ScrapedData});
             }
             catch(error){
             console.log(error);

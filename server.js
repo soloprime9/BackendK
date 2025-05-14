@@ -5,6 +5,7 @@ const jsonwebtoken = require("jsonwebtoken");
 const Post = require("./routers/Post");
 const User = require("./routers/User");
 const Content = require("./routers/content");
+const AutoAI = require("./routers/autoai");
 const cors = require("cors") ;
 const path = require("path");
 
@@ -41,6 +42,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use("/user", User);
 app.use("/post", Post);
 app.use("/content", Content);
+app.use("/autoai", AutoAI);
 
 
 // app.listen(4000, console.log("This Program run on 4000 Port"));

@@ -97,6 +97,7 @@ router.get("/result", async(req, res) => {
             console.log(error);
             }
     }
+    }
 
     catch(error){
         console.log(error);

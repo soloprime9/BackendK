@@ -289,4 +289,23 @@ router.post("/comment/:postId", verifyToken, async(req, res) =>{
 
 })
 
+
+router.get("/single/:id", async(req, res) =>{
+    
+   try{
+    const{ id } = req.params;
+    const celect = await Post.findById(id);
+    if(!celect){
+        return res.status(400).json("Post not found");
+
+    }
+    res.status(200).json(celect)
+
+   }
+   catch(error){
+    console.log(error)
+   }
+
+})
+
 module.exports = router;

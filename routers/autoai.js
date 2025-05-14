@@ -53,7 +53,8 @@ router.get("/search", async(req, res) => {
 
         }))
 
-        console.log(results);
+        // console.log(results);
+        
         
         const LinkStore = {};
         results.forEach((item,index) => {
@@ -74,32 +75,33 @@ router.get("/search", async(req, res) => {
 
                 // Extract title and content 
 
-                const title = $("title").text() || $("h1").text();
-                const content = $("article").text().trim() || $("p").text().trim().slice(0, 100);
+                // const title = $("title").text() || $("h1").text();
+                // const content = $("article").text().trim() || $("p").text().trim().slice(0, 100);
 
-                // const images = [];
-                // $("img").each((index, element) => {
-                //     let imageUrl = $(element).attr("src");
+                const images = [];
+                $("img").each((index, element) => {
+                    let imageUrl = $(element).attr("src");
 
-                //     // Handle relative URLs by converting them to absolute URLs
-                //     if (imageUrl) {
-                //         // If the image URL is relative, resolve it to an absolute URL
-                //         if (!imageUrl.startsWith('http') && !imageUrl.startsWith('https')) {
-                //             imageUrl = url.resolve(urlToScrape, imageUrl);
-                //         }
-                //         images.push(imageUrl);
-                //     }
-                // });
+                    // Handle relative URLs by converting them to absolute URLs
+                    if (imageUrl) {
+                        // If the image URL is relative, resolve it to an absolute URL
+                        if (!imageUrl.startsWith('http') && !imageUrl.startsWith('https')) {
+                            imageUrl = url.resolve(urlToScrape, imageUrl);
+                        }
+                        images.push(imageUrl);
+                    }
+                });
                 
                 ScrapedData.push({
-                    url,
-                    title,
-                    content: content || "No Content",
-                    // images
+                    // url,
+                    // title,
+                    // content: content || "No Content",
+                    images,
+                    results
 
                 })
 
-                console.log("Scraping Success: ", url)
+                res.json("Scraping Success: ", ScrapedData);
                 
 
             }
@@ -118,7 +120,7 @@ router.get("/search", async(req, res) => {
         //     data: ScrapedData
         // });
 
-        ScrappedPushData.push(ScrapedData);
+        // ScrappedPushData.push(ScrapedData);
     }
 
 
@@ -129,13 +131,13 @@ router.get("/search", async(req, res) => {
 
     
 
-    const CleanScrappedData = ScrappedPushData.map(item => ({
-        ... item,
-        content: CleanScraped(item.content)
+    // const CleanScrappedData = ScrappedPushData.map(item => ({
+    //     ... item,
+    //     content: CleanScraped(item.content)
         
-    }));
+    // }));
 
-    res.json("Cleaned Data : ", CleanScrappedData)
+    // res.json("Cleaned Data : ", CleanScrappedData)
 
 
 

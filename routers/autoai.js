@@ -54,74 +54,75 @@ router.get("/search", async(req, res) => {
         }))
 
         // console.log(results);
+        res.status(200).json(results);
         
         
-        const LinkStore = {};
-        results.forEach((item,index) => {
-            LinkStore[index] = item.link;
-        })
+    //     const LinkStore = {};
+    //     results.forEach((item,index) => {
+    //         LinkStore[index] = item.link;
+    //     })
 
-        console.log(LinkStore);
+    //     console.log(LinkStore);
 
-        const ScrapedData = [];
+    //     const ScrapedData = [];
 
-        for (let i = 0; i < Object.keys(LinkStore).length; i++){
-            const url = LinkStore[i];
+    //     for (let i = 0; i < Object.keys(LinkStore).length; i++){
+    //         const url = LinkStore[i];
             
             
-            try {
-                const response = await axios.get(url);
-                const $ = cheerio.load(response.data);
+    //         try {
+    //             const response = await axios.get(url);
+    //             const $ = cheerio.load(response.data);
 
-                // Extract title and content 
+    //             // Extract title and content 
 
-                // const title = $("title").text() || $("h1").text();
-                // const content = $("article").text().trim() || $("p").text().trim().slice(0, 100);
+    //             // const title = $("title").text() || $("h1").text();
+    //             // const content = $("article").text().trim() || $("p").text().trim().slice(0, 100);
 
-                const images = [];
-                $("img").each((index, element) => {
-                    let imageUrl = $(element).attr("src");
+    //             const images = [];
+    //             $("img").each((index, element) => {
+    //                 let imageUrl = $(element).attr("src");
 
-                    // Handle relative URLs by converting them to absolute URLs
-                    if (imageUrl) {
-                        // If the image URL is relative, resolve it to an absolute URL
-                        if (!imageUrl.startsWith('http') && !imageUrl.startsWith('https')) {
-                            imageUrl = url.resolve(urlToScrape, imageUrl);
-                        }
-                        images.push(imageUrl);
-                    }
-                });
+    //                 // Handle relative URLs by converting them to absolute URLs
+    //                 if (imageUrl) {
+    //                     // If the image URL is relative, resolve it to an absolute URL
+    //                     if (!imageUrl.startsWith('http') && !imageUrl.startsWith('https')) {
+    //                         imageUrl = url.resolve(urlToScrape, imageUrl);
+    //                     }
+    //                     images.push(imageUrl);
+    //                 }
+    //             });
                 
-                ScrapedData.push({
-                    // url,
-                    // title,
-                    // content: content || "No Content",
-                    images,
-                    results
+    //             ScrapedData.push({
+    //                 // url,
+    //                 // title,
+    //                 // content: content || "No Content",
+    //                 images,
+    //                 results
 
-                })
+    //             })
 
-                res.status(200).json("Scraping Success: ", ScrapedData);
+    //             res.status(200).json("Scraping Success: ", ScrapedData);
                 
 
-            }
-            catch(error){
-                console.log(`Scraping Error ${url}:`, error.message);
-                ScrapedData.push({
-                    url,
-                    error:true,
-                    message: error.message
-                })
-            }
-        }
+    //         }
+    //         catch(error){
+    //             console.log(`Scraping Error ${url}:`, error.message);
+    //             ScrapedData.push({
+    //                 url,
+    //                 error:true,
+    //                 message: error.message
+    //             })
+    //         }
+    //     }
 
-        // res.json({
-        //     total: ScrapedData.length,
-        //     data: ScrapedData
-        // });
+    //     // res.json({
+    //     //     total: ScrapedData.length,
+    //     //     data: ScrapedData
+    //     // });
 
-        // ScrappedPushData.push(ScrapedData);
-    }
+    //     // ScrappedPushData.push(ScrapedData);
+    // }
 
 
 

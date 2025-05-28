@@ -174,7 +174,7 @@ router.get("/search", async(req, res) => {
           - ✅ Do NOT hallucinate or invent information.
           - ✅ Use only factual and current data, avoid any outdated or generic text.
           - ✅ Include new and fresh information if available.
-          - ✅ Make ONE of the 6 posts longer (around 100 words), giving a full detailed view or story.
+          - ✅ Make ONE of the 6 posts longer (around 200 words), giving a full detailed view or story.
           - ✅ Keep the other 5 posts short (max 50 words), crisp, catchy, and valuable.
           - ✅ Include 2 relevant hashtags and 1–2 emojis in each post.
           - ✅ Return ONLY a valid JSON array, like: ["Post 1...", "Post 2...", ..., "Post 6..."]

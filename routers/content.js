@@ -323,7 +323,7 @@ router.get("/gen", async(req,res) => {
 router.get("/get", async(req, res) => {
     
     try{
-    const detail = await Content.find().limit(50);
+    const detail = await Content.find().limit(50).sort({ _id: -1 });
 
     if(detail.length === 0){
         return res.status(400).json("Content not found");

@@ -86,20 +86,61 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
             stream.end(req.file.buffer);
         });
 
-        // ✅ Wait for Cloudinary Upload (With Timeout Protection)
+        // // ✅ Wait for Cloudinary Upload (With Timeout Protection)
+        // const uploadResult = await Promise.race([UploadPromise, PromiseTimeOut]);
+
+        // // ✅ Create New Post in MongoDB
+        // const newPost = new Post({
+        //     userId: UserId,
+        //     title: req.body.title,
+        //     media: uploadResult.secure_url, // ✅ Cloudinary URL
+        //     tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
+        //     likes: [],
+        //     comments: [],
+        // });
+
+        // Wait for Cloudinary Upload (With Timeout Protection)
         const uploadResult = await Promise.race([UploadPromise, PromiseTimeOut]);
+        
+        // Extract the secure URL from the upload result
+        const mediaUrl = uploadResult.secure_url;
+        
+        // Initialize the thumbnail variable
+        let thumbnail = "";
+        
+        // Determine if the uploaded media is a video
+        if (mediaUrl.includes("/video/")) {
+          // Extract the public ID of the video from the URL
+          const publicId = mediaUrl
+            .split("/upload/")[1]
+            .split(".")[0];
+        
+          // Construct the thumbnail URL by requesting a frame at 2 seconds
+          thumbnail = `https://res.cloudinary.com/dczulxzko/video/upload/so_2/${publicId}.jpg`;
+            } else {
+              // If the media is an image, use the same URL as the thumbnail
+              thumbnail = mediaUrl;
+            }
+            
+            // Create a new Post document in MongoDB
+            const newPost = new Post({
+              userId: UserId,
+              title: req.body.title,
+              media: mediaUrl, // Cloudinary URL
+              thumbnail: thumbnail, // Generated thumbnail URL
+              tags: req.body.title
+                .split("#")
+                .slice(1)
+                .map((tag) => tag.trim().split(" ")[0]),
+              likes: [],
+              comments: [],
+            });
+            
+            // Save the new post to MongoDB
+            await newPost.save();
 
-        // ✅ Create New Post in MongoDB
-        const newPost = new Post({
-            userId: UserId,
-            title: req.body.title,
-            media: uploadResult.secure_url, // ✅ Cloudinary URL
-            tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
-            likes: [],
-            comments: [],
-        });
 
-        await newPost.save(); // ✅ Save Post to MongoDB
+        // await newPost.save(); // ✅ Save Post to MongoDB
 
         console.log("Upload Success:", newPost);
         return res.status(200).json({ success: true, message: "Upload successful", post: newPost });

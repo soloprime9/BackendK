@@ -6,6 +6,7 @@ const PostSchema = Schema ({
     title: {type: String, default : ""},
     tags : [{type: String, trim: true}],
     media: {type: String, required: true}, //Cloudary give Url
+    thumbnail: { type: String, default: "" },
     medias: {
     public_id: String,
     url: String,

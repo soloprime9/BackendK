@@ -223,10 +223,10 @@ router.get("/search", async(req, res) => {
             
 
             const helloElement = newContent.map((item, index) => {
-            const item = results[index];
+            const kota = results[index];
             const image =
-              item?.pagemap?.cse_thumbnail?.[0]?.src ||
-              item?.pagemap?.cse_image?.[0]?.src ||
+              kota?.pagemap?.cse_thumbnail?.[0]?.src ||
+              kota?.pagemap?.cse_image?.[0]?.src ||
               null;
 
             return {

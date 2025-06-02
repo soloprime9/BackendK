@@ -222,12 +222,9 @@ router.get("/search", async(req, res) => {
             const newContent = hello.filter((item) => !existcontent.includes(item));
             
 
-            const helloElement = newContent.map((item, index) => {
-            const kota = results[index];
-            const image =
-              kota?.pagemap?.cse_thumbnail?.[0]?.src ||
-              kota?.pagemap?.cse_image?.[0]?.src ||
-              null;
+            const helloElement = newContent.map((item) => {
+            const image = item.cse_image || item.thumbnail || null;
+            
 
             return {
                 content: item, 

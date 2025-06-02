@@ -220,17 +220,31 @@ router.get("/search", async(req, res) => {
             const existcontent = await Content.find({content: {$in : hello}}).distinct("content");
 
             const newContent = hello.filter((item) => !existcontent.includes(item));
+
+
+            const helloElement = newContent.map((item, index) => {
+                const kota = results.find(r => r.title === item); // safer match
+                const image = kota?.cse_image || kota?.thumbnail || null;
+              
+                return {
+                  content: item,
+                  imageURL: image,
+                  unique: true,
+                };
+              });
+
+
+
+         
+            // const helloElement = newContent.map((item) => {
+            // const image = item.cse_image || item.thumbnail || null;
             
 
-            const helloElement = newContent.map((item) => {
-            const image = item.cse_image || item.thumbnail || null;
-            
-
-            return {
-                content: item, 
-                imageURL : image,
-                unique: true,
-            }
+            // return {
+            //     content: item, 
+            //     imageURL : image,
+            //     unique: true,
+            // }
         });
 
 

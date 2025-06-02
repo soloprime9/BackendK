@@ -86,7 +86,12 @@ router.get("/search", async(req, res) => {
 
         }))
 
-        images = results.map(item => item.cse_image).filter(Boolean);
+        const images = results.map(item => {
+          const thumbnail = item.pagemap?.cse_thumbnail?.[0]?.src;
+          const mainImage = item.pagemap?.cse_image?.[0]?.src;
+          return thumbnail || mainImage || null;
+        }).filter(Boolean);
+
         filteredImages = images.filter(url =>
             /^https?:\/\/.+\.(jpg|jpeg|png|webp|gif|bmp)(\?.*)?$/i.test(url)
           );

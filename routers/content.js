@@ -197,7 +197,7 @@ router.get("/search", async(req, res) => {
           
           hello = (posts)
           
-          res.status(200).json(posts);
+          // res.status(200).json(posts);
 
           if(hello){
             console.log("hello Dear", hello);

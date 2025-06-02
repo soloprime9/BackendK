@@ -92,9 +92,9 @@ router.get("/search", async(req, res) => {
           return thumbnail || mainImage || null;
         }).filter(Boolean);
 
-        filteredImages = images.filter(url =>
-            /^https?:\/\/.+\.(jpg|jpeg|png|webp|gif|bmp)(\?.*)?$/i.test(url)
-          );
+        // filteredImages = images.filter(url =>
+        //     /^https?:\/\/.+\.(jpg|jpeg|png|webp|gif|bmp)(\?.*)?$/i.test(url)
+        //   );
         console.log(images);
         
 
@@ -223,7 +223,12 @@ router.get("/search", async(req, res) => {
             
 
             const helloElement = newContent.map((item, index) => {
-            const image = images[index] || null; 
+            const item = results[index];
+            const image =
+              item?.pagemap?.cse_thumbnail?.[0]?.src ||
+              item?.pagemap?.cse_image?.[0]?.src ||
+              null;
+
             return {
                 content: item, 
                 imageURL : image,

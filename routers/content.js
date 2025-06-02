@@ -245,7 +245,7 @@ router.get("/search", async(req, res) => {
             //     imageURL : image,
             //     unique: true,
             // }
-        });
+
 
 
 

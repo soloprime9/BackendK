@@ -86,11 +86,11 @@ router.get("/search", async(req, res) => {
 
         }))
 
-        // const images = results.map(item => {
-        //   const thumbnail = item.pagemap?.cse_thumbnail?.[0]?.src;
-        //   const mainImage = item.pagemap?.cse_image?.[0]?.src;
-        //   return thumbnail || mainImage || null;
-        // }).filter(Boolean);
+      images = results.map(item => item.thumbnail || item.cse_image).filter(Boolean);
+
+
+        
+             
 
         // filteredImages = images.filter(url =>
         //     /^https?:\/\/.+\.(jpg|jpeg|png|webp|gif|bmp)(\?.*)?$/i.test(url)
@@ -223,15 +223,14 @@ router.get("/search", async(req, res) => {
 
 
             const helloElement = newContent.map((item, index) => {
-                const kota = results.find(r => r.title === item); // safer match
-                const image = kota?.cse_image || kota?.thumbnail || null;
-              
-                return {
-                  content: item,
-                  imageURL: image,
-                  unique: true,
-                };
-              });
+                const originalIndex = hello.indexOf(item);
+                const image = images[originalIndex] || null;                
+                 return {
+                    content: item,
+                    imageURL: image,
+                    unique: true,
+                 };
+             });
 
 
 

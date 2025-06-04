@@ -224,7 +224,7 @@ router.get("/search", async(req, res) => {
 
             const helloElement = newContent.map((item, index) => {
                 const originalIndex = hello.indexOf(item);
-                const image = images[item] || null;                
+                const image = images[index];                
                  return {
                     content: item,
                     imageURL: image,

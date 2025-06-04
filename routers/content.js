@@ -86,7 +86,7 @@ router.get("/search", async(req, res) => {
 
         }))
 
-      images = results.map(item => item.thumbnail || item.cse_image).filter(Boolean);
+      images = results.map(item => item.thumbnail).filter(Boolean);
 
 
         
@@ -224,7 +224,7 @@ router.get("/search", async(req, res) => {
 
             const helloElement = newContent.map((item, index) => {
                 const originalIndex = hello.indexOf(item);
-                const image = images[originalIndex] || null;                
+                const image = images[item] || null;                
                  return {
                     content: item,
                     imageURL: image,

@@ -86,7 +86,7 @@ router.get("/search", async(req, res) => {
 
         }))
 
-      images = results.map(item => item.cse_image).filter(Boolean);
+      images = results.map(item => item.thumbnail).filter(Boolean);
 
 
         

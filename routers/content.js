@@ -407,22 +407,65 @@ router.get("/get", async(req, res) => {
 // })
 
 
-router.get("/post/:id", async(req, res) =>{
+// router.get("/post/:id", async(req, res) =>{
     
-   try{
-    const{ id } = req.params;
-    const celect = await Content.findById(id);
-    if(!celect){
-        return res.status(400).json("Post not found");
+//    try{
+//     const{ id } = req.params;
+//     const celect = await Content.findById(id);
+//     if(!celect){
+//         return res.status(400).json("Post not found");
 
+//     }
+//     res.status(200).json(celect)
+
+//    }
+//    catch(error){
+//     console.log(error)
+//    }
+
+// })
+
+
+
+router.get("/post/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Step 1: Post le lo
+        const celect = await Content.findById(id);
+
+        if (!celect) {
+            return res.status(400).json("Post not found");
+        }
+
+        // Step 2: Hashtags nikaalo
+        const content = celect.content || '';
+        const hashtags = content.match(/#[\w]+/g) || [];
+
+        // Step 3: Related posts find karo
+        let relatedPosts = [];
+
+        if (hashtags.length > 0) {
+            relatedPosts = await Content.find({
+                _id: { $ne: celect._id },  // current post exclude
+                content: {
+                    $regex: hashtags.map(tag => tag.replace('#', '\\#')).join('|'),
+                    $options: 'i'
+                }
+            }).limit(10);
+        }
+
+        // Step 4: Response bhej do
+        res.status(200).json({
+            post: celect,
+            relatedPosts: relatedPosts
+        });
+
+    } catch (error) {
+        console.log(error);
+        res.status(500).json("Internal server error");
     }
-    res.status(200).json(celect)
+});
 
-   }
-   catch(error){
-    console.log(error)
-   }
-
-})
 
 module.exports = router;

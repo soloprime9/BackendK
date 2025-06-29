@@ -10,7 +10,7 @@ require("dotenv").config();
 const multer = require("multer");
 const { Client, Storage, ID } = require("node-appwrite");
 
-const upload = multer({ storage: multer.memoryStorage() });
+
 
 
 

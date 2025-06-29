@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Post = require("../models/Post");
-const multer = require("multer");
+
 const verifyToken = require("../middleware/verifyToken");
 const User = require("../models/User");
 const { v2: cloudinary } = require("cloudinary");

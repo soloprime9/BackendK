@@ -27,7 +27,7 @@ const client = new Client()
 
 const storage = new Storage(client);
 
-const router = express.Router();
+
 
 router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   try {

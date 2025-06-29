@@ -12,81 +12,71 @@ const { Client, Storage, ID } = require("node-appwrite");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Appwrite Setup
+
+
+const { InputFile } = require('node-appwrite/file');
+
+
+
+const upload = multer({ storage: multer.memoryStorage() });
+
 const client = new Client()
-    .setEndpoint(process.env.APPWRITE_ENDPOINT)
-    .setProject(process.env.APPWRITE_PROJECT_ID)
-    .setKey(process.env.APPWRITE_API_KEY);
+  .setEndpoint('https://nyc.cloud.appwrite.io/v1')
+  .setProject('fondpeace')
+  .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
 
 const storage = new Storage(client);
 
-router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
-  const { title } = req.body;
-  const UserId = req.body.userId; // You can modify this to use token-based auth
+const router = express.Router();
 
+router.post('/upload',verifyToken, upload.single('file'), async (req, res) => {
   try {
-    // ✅ Check user exists
+    const file = req.file;
+    const UserId = req.user.UserId;
+    const { title, tags } = req.body;
+
+    if (!file) return res.status(400).json("File not found");
     const user = await User.findById(UserId);
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (!user) return res.status(404).json("User not found");
 
-    if (!req.file) return res.status(400).json({ success: false, message: "No file uploaded" });
+    const bucketId = '685fc9880036ec074baf'; // ensure valid bucket ID
+    const fileId = ID.unique();
+    const input = InputFile.fromBuffer(file.buffer, file.originalname);
 
-    const fileBuffer = req.file.buffer;
+    const uploaded = await storage.createFile(bucketId, fileId, input);
+    const proj = client.config.project;
+    const endpoint = client.config.endpoint.replace(/\/v1$/, '');
 
-    // ✅ Upload to Appwrite
-    const uploaded = await storage.createFile(
-      process.env.APPWRITE_BUCKET_ID,
-      ID.unique(),
-      fileBuffer,
-      req.file.mimetype,
-      {
-        contentType: req.file.mimetype,
-        filename: req.file.originalname,
-      }
-    );
-
-    const mediaUrl = `${process.env.APPWRITE_ENDPOINT}/storage/buckets/${process.env.APPWRITE_BUCKET_ID}/files/${uploaded.$id}/view?project=${process.env.APPWRITE_PROJECT_ID}`;
-
-    // ✅ Thumbnail Logic
-    let thumbnail = mediaUrl;
-    if (req.file.mimetype.startsWith("video/")) {
-      thumbnail = ""; // Optional: add static placeholder or use Appwrite Functions/FFmpeg
-    }
-
-    // ✅ Save Post in MongoDB
-    const tags = title
-      .split("#")
-      .slice(1)
-      .map((tag) => tag.trim().split(" ")[0]);
+    const mediaUrl = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/view?project=${proj}`;
+    const thumbnail = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/preview?project=${proj}`;
 
     const newPost = new Post({
-      userId: UserId,
+      userId,
       title,
       media: mediaUrl,
       thumbnail,
-      tags,
+      tags: tags ? tags.split(',') : [],
       likes: [],
       comments: [],
     });
 
     await newPost.save();
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       message: "Upload successful",
       post: newPost,
+      mediaUrl,
+      thumbnail,
     });
 
-  } catch (error) {
-    console.error("Upload Error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message.includes("Time Out")
-        ? "Time Out - Try Smaller File"
-        : "Upload Failed",
-    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
+
+
 
 
 

@@ -20,7 +20,7 @@ const client = new Client()
 
 const storage = new Storage(client);
 
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
   const { title } = req.body;
   const UserId = req.body.userId; // You can modify this to use token-based auth
 

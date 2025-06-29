@@ -36,17 +36,23 @@ router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
     const { title, tags } = req.body;
 
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
-
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const bucketId = '685fc9880036ec074baf';
     const fileId = ID.unique();
     const input = InputFile.fromBuffer(file.buffer, file.originalname);
-    const uploaded = await storage.createFile(bucketId, fileId, input);
+
+    const uploaded = await storage.createFile(
+      bucketId,
+      fileId,
+      input,
+      [ Permission.read(Role.any()) ]  // ← Public read access
+    );
 
     const proj = client.config.project;
     const endpoint = client.config.endpoint.replace(/\/v1$/, '');
+
     const mediaUrl = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/view?project=${proj}`;
     const thumbnail = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/preview?project=${proj}`;
 
@@ -60,20 +66,8 @@ router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
       comments: [],
     });
 
-    console.log('Saving post:', newPost);
-    const savedPost = await newPost.save().catch(err => {
-      console.error('Error saving post:', err);
-      throw err;
-    });
-    console.log('Saved post:', savedPost);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Upload successful',
-      post: savedPost,
-      mediaUrl,
-      thumbnail,
-    });
+    const savedPost = await newPost.save();
+    return res.status(200).json({ success: true, post: savedPost, mediaUrl, thumbnail });
 
   } catch (err) {
     console.error('Route error:', err);

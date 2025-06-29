@@ -8,7 +8,7 @@ const { v2: cloudinary } = require("cloudinary");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 require("dotenv").config();
 const multer = require("multer");
-const { Client, Storage, ID } = require("node-appwrite");
+const { Client, Storage, ID, Permission, Role } = require("node-appwrite");
 
 
 

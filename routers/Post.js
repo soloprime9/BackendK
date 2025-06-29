@@ -29,24 +29,24 @@ const storage = new Storage(client);
 
 const router = express.Router();
 
-router.post('/upload',verifyToken, upload.single('file'), async (req, res) => {
+router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
-    const UserId = req.user.UserId;
+    const userId = req.user.UserId;
     const { title, tags } = req.body;
 
-    if (!file) return res.status(400).json("File not found");
-    const user = await User.findById(UserId);
-    if (!user) return res.status(404).json("User not found");
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const bucketId = '685fc9880036ec074baf'; // ensure valid bucket ID
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const bucketId = '685fc9880036ec074baf';
     const fileId = ID.unique();
     const input = InputFile.fromBuffer(file.buffer, file.originalname);
-
     const uploaded = await storage.createFile(bucketId, fileId, input);
+
     const proj = client.config.project;
     const endpoint = client.config.endpoint.replace(/\/v1$/, '');
-
     const mediaUrl = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/view?project=${proj}`;
     const thumbnail = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/preview?project=${proj}`;
 
@@ -60,22 +60,26 @@ router.post('/upload',verifyToken, upload.single('file'), async (req, res) => {
       comments: [],
     });
 
-    await newPost.save();
+    console.log('Saving post:', newPost);
+    const savedPost = await newPost.save().catch(err => {
+      console.error('Error saving post:', err);
+      throw err;
+    });
+    console.log('Saved post:', savedPost);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Upload successful",
-      post: newPost,
+      message: 'Upload successful',
+      post: savedPost,
       mediaUrl,
       thumbnail,
     });
 
   } catch (err) {
-    console.error(err);
+    console.error('Route error:', err);
     res.status(500).json({ error: err.message });
   }
 });
-
 
 
 

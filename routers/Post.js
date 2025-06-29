@@ -7,153 +7,208 @@ const User = require("../models/User");
 const { v2: cloudinary } = require("cloudinary");
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 require("dotenv").config();
+const multer = require("multer");
+const { Client, Storage, ID } = require("node-appwrite");
 
-// Cloudinary Configure
-cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+const upload = multer({ storage: multer.memoryStorage() });
 
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET 
-});
+// Appwrite Setup
+const client = new Client()
+    .setEndpoint(process.env.APPWRITE_ENDPOINT)
+    .setProject(process.env.APPWRITE_PROJECT_ID)
+    .setKey(process.env.APPWRITE_API_KEY);
 
-console.log({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET
-});
+const storage = new Storage(client);
 
-// Multer Storage for File Uploads (Memory Storage for Buffer)
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+router.post("/upload", upload.single("file"), async (req, res) => {
+  const { title } = req.body;
+  const UserId = req.body.userId; // You can modify this to use token-based auth
 
-// API Endpoint for Image Upload
-router.post("/uploader", upload.single("file"), async (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: "No file uploaded" });
-        }
+  try {
+    // ✅ Check user exists
+    const user = await User.findById(UserId);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-        // Upload Image to Cloudinary
-        cloudinary.uploader.upload_stream({ resource_type: "auto" }, (error, uploadResult) => {
-            if (error) {
-                console.error("Cloudinary Upload Error:", error);
-                return res.status(500).json({ success: false, message: "Upload failed", error });
-            }
+    if (!req.file) return res.status(400).json({ success: false, message: "No file uploaded" });
 
-            res.status(200).json({
-                success: true,
-                message: "Upload successful",
-                imageUrl: uploadResult.secure_url
-            });
-        }).end(req.file.buffer); // End the stream properly
+    const fileBuffer = req.file.buffer;
 
+    // ✅ Upload to Appwrite
+    const uploaded = await storage.createFile(
+      process.env.APPWRITE_BUCKET_ID,
+      ID.unique(),
+      fileBuffer,
+      req.file.mimetype,
+      {
+        contentType: req.file.mimetype,
+        filename: req.file.originalname,
+      }
+    );
 
-    } catch (error) {
-        console.error("Server Error:", error);
-        res.status(500).json({ success: false, message: "Internal server error", error });
+    const mediaUrl = `${process.env.APPWRITE_ENDPOINT}/storage/buckets/${process.env.APPWRITE_BUCKET_ID}/files/${uploaded.$id}/view?project=${process.env.APPWRITE_PROJECT_ID}`;
+
+    // ✅ Thumbnail Logic
+    let thumbnail = mediaUrl;
+    if (req.file.mimetype.startsWith("video/")) {
+      thumbnail = ""; // Optional: add static placeholder or use Appwrite Functions/FFmpeg
     }
+
+    // ✅ Save Post in MongoDB
+    const tags = title
+      .split("#")
+      .slice(1)
+      .map((tag) => tag.trim().split(" ")[0]);
+
+    const newPost = new Post({
+      userId: UserId,
+      title,
+      media: mediaUrl,
+      thumbnail,
+      tags,
+      likes: [],
+      comments: [],
+    });
+
+    await newPost.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Upload successful",
+      post: newPost,
+    });
+
+  } catch (error) {
+    console.error("Upload Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message.includes("Time Out")
+        ? "Time Out - Try Smaller File"
+        : "Upload Failed",
+    });
+  }
 });
 
 
 
 
-router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
-    const title = req.body.title;
-    const UserId = req.user.UserId;
+// // Cloudinary Configure
+// cloudinary.config({
+//     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+
+//     api_key: process.env.CLOUDINARY_API_KEY,
+//     api_secret: process.env.CLOUDINARY_API_SECRET 
+// });
+
+// console.log({
+//     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+//     api_key: process.env.CLOUDINARY_API_KEY,
+//     api_secret: process.env.CLOUDINARY_API_SECRET
+// });
+
+// // Multer Storage for File Uploads (Memory Storage for Buffer)
+// const storage = multer.memoryStorage();
+// const upload = multer({ storage });
+
+
+
+
+// router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
+//     const title = req.body.title;
+//     const UserId = req.user.UserId;
     
-    try {
-        // ✅ Check if User Exists
-        const user = await User.findById(UserId);
-        if (!user) {
-            return res.status(404).json({ success: false, message: "User Not Found" });
-        }
+//     try {
+//         // ✅ Check if User Exists
+//         const user = await User.findById(UserId);
+//         if (!user) {
+//             return res.status(404).json({ success: false, message: "User Not Found" });
+//         }
 
-        // ✅ Check if File is Uploaded
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: "No file uploaded" });
-        }
+//         // ✅ Check if File is Uploaded
+//         if (!req.file) {
+//             return res.status(400).json({ success: false, message: "No file uploaded" });
+//         }
 
-        // ✅ Set Upload Timeout (25 Seconds)
-        const PromiseTimeOut = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("Time Out - Try Smaller File")), 25000);
-        });
+//         // ✅ Set Upload Timeout (25 Seconds)
+//         const PromiseTimeOut = new Promise((_, reject) => {
+//             setTimeout(() => reject(new Error("Time Out - Try Smaller File")), 25000);
+//         });
 
-        // ✅ Upload to Cloudinary
-        const UploadPromise = new Promise((resolve, reject) => {
-            const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" },
-                (error, result) => (error ? reject(error) : resolve(result))
-            );
-            stream.end(req.file.buffer);
-        });
+//         // ✅ Upload to Cloudinary
+//         const UploadPromise = new Promise((resolve, reject) => {
+//             const stream = cloudinary.uploader.upload_stream({ resource_type: "auto" },
+//                 (error, result) => (error ? reject(error) : resolve(result))
+//             );
+//             stream.end(req.file.buffer);
+//         });
 
-        // // ✅ Wait for Cloudinary Upload (With Timeout Protection)
-        // const uploadResult = await Promise.race([UploadPromise, PromiseTimeOut]);
+//         // // ✅ Wait for Cloudinary Upload (With Timeout Protection)
+//         // const uploadResult = await Promise.race([UploadPromise, PromiseTimeOut]);
 
-        // // ✅ Create New Post in MongoDB
-        // const newPost = new Post({
-        //     userId: UserId,
-        //     title: req.body.title,
-        //     media: uploadResult.secure_url, // ✅ Cloudinary URL
-        //     tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
-        //     likes: [],
-        //     comments: [],
-        // });
+//         // // ✅ Create New Post in MongoDB
+//         // const newPost = new Post({
+//         //     userId: UserId,
+//         //     title: req.body.title,
+//         //     media: uploadResult.secure_url, // ✅ Cloudinary URL
+//         //     tags: req.body.title.split("#").slice(1).map(tag => tag.trim().split(" ")[0]),
+//         //     likes: [],
+//         //     comments: [],
+//         // });
 
-        // Wait for Cloudinary Upload (With Timeout Protection)
-        const uploadResult = await Promise.race([UploadPromise, PromiseTimeOut]);
+//         // Wait for Cloudinary Upload (With Timeout Protection)
+//         const uploadResult = await Promise.race([UploadPromise, PromiseTimeOut]);
         
-        // Extract the secure URL from the upload result
-        const mediaUrl = uploadResult.secure_url;
+//         // Extract the secure URL from the upload result
+//         const mediaUrl = uploadResult.secure_url;
         
-        // Initialize the thumbnail variable
-        let thumbnail = "";
+//         // Initialize the thumbnail variable
+//         let thumbnail = "";
         
-        // Determine if the uploaded media is a video
-        if (mediaUrl.includes("/video/")) {
-          // Extract the public ID of the video from the URL
-          const publicId = mediaUrl
-            .split("/upload/")[1]
-            .split(".")[0];
+//         // Determine if the uploaded media is a video
+//         if (mediaUrl.includes("/video/")) {
+//           // Extract the public ID of the video from the URL
+//           const publicId = mediaUrl
+//             .split("/upload/")[1]
+//             .split(".")[0];
         
-          // Construct the thumbnail URL by requesting a frame at 2 seconds
-          thumbnail = `https://res.cloudinary.com/dczulxzko/video/upload/so_2/${publicId}.jpg`;
-            } else {
-              // If the media is an image, use the same URL as the thumbnail
-              thumbnail = mediaUrl;
-            }
+//           // Construct the thumbnail URL by requesting a frame at 2 seconds
+//           thumbnail = `https://res.cloudinary.com/dczulxzko/video/upload/so_2/${publicId}.jpg`;
+//             } else {
+//               // If the media is an image, use the same URL as the thumbnail
+//               thumbnail = mediaUrl;
+//             }
             
-            // Create a new Post document in MongoDB
-            const newPost = new Post({
-              userId: UserId,
-              title: req.body.title,
-              media: mediaUrl, // Cloudinary URL
-              thumbnail: thumbnail, // Generated thumbnail URL
-              tags: req.body.title
-                .split("#")
-                .slice(1)
-                .map((tag) => tag.trim().split(" ")[0]),
-              likes: [],
-              comments: [],
-            });
+//             // Create a new Post document in MongoDB
+//             const newPost = new Post({
+//               userId: UserId,
+//               title: req.body.title,
+//               media: mediaUrl, // Cloudinary URL
+//               thumbnail: thumbnail, // Generated thumbnail URL
+//               tags: req.body.title
+//                 .split("#")
+//                 .slice(1)
+//                 .map((tag) => tag.trim().split(" ")[0]),
+//               likes: [],
+//               comments: [],
+//             });
             
-            // Save the new post to MongoDB
-            await newPost.save();
+//             // Save the new post to MongoDB
+//             await newPost.save();
 
 
-        // await newPost.save(); // ✅ Save Post to MongoDB
+//         // await newPost.save(); // ✅ Save Post to MongoDB
 
-        console.log("Upload Success:", newPost);
-        return res.status(200).json({ success: true, message: "Upload successful", post: newPost });
+//         console.log("Upload Success:", newPost);
+//         return res.status(200).json({ success: true, message: "Upload successful", post: newPost });
 
-    } catch (error) {
-        console.error("Upload Error:", error);
+//     } catch (error) {
+//         console.error("Upload Error:", error);
         
-        return res.status(500).json({ 
-            success: false, 
-            message: error.message.includes("Time Out") ? "Time Out - Try Smaller File" : "Upload Failed"
-        });
-    }
-});
+//         return res.status(500).json({ 
+//             success: false, 
+//             message: error.message.includes("Time Out") ? "Time Out - Try Smaller File" : "Upload Failed"
+//         });
+//     }
+// });
 
 
 router.get("/mango/getall", async (req, res) => {

@@ -31,7 +31,7 @@ const storage = new Storage(client);
 
 router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   try {
-    const file = req.file;
+    const { file } = req;
     const userId = req.user.UserId;
     const { title, tags } = req.body;
 
@@ -47,11 +47,11 @@ router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
       bucketId,
       fileId,
       input,
-      [ Permission.read(Role.any()) ]  // ← Public read access
+      [ Permission.read(Role.any()) ] // Public read permission:contentReference[oaicite:4]{index=4}
     );
 
     const proj = client.config.project;
-    const endpoint = client.config.endpoint.replace(/\/v1$/, '');
+    const endpoint = client.config.endpoint; // includes '/v1'
 
     const mediaUrl = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/view?project=${proj}`;
     const thumbnail = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/preview?project=${proj}`;
@@ -67,8 +67,13 @@ router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
     });
 
     const savedPost = await newPost.save();
-    return res.status(200).json({ success: true, post: savedPost, mediaUrl, thumbnail });
 
+    res.status(200).json({
+      success: true,
+      post: savedPost,
+      mediaUrl,
+      thumbnail,
+    });
   } catch (err) {
     console.error('Route error:', err);
     res.status(500).json({ error: err.message });

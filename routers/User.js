@@ -156,5 +156,22 @@ router.post("/follow/:userId",verifyToken, async(req, res) => {
     }
 })
 
+router.post('/check-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
+
+    const userExists = await User.findOne({ email: email.toLowerCase().trim() });
+    if (userExists) {
+      return res.json({ available: false });
+    } else {
+      return res.json({ available: true });
+    }
+  } catch (error) {
+    console.error('Error checking email availability:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 
 module.exports = router;

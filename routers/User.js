@@ -46,6 +46,7 @@ router.post('/add', async (req, res) => {
     }
 })
 
+
 router.post("/login", async (req, res) => {
    const {email, password} = req.body;
    const user = await User.findOne({email});
@@ -64,6 +65,34 @@ router.post("/login", async (req, res) => {
    
 
 })
+
+
+// GET /user/profile/:id
+router.get('/profile/:id', verifyToken, async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    // Find user and exclude password
+    const user = await User.findById(userId).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Get user's posts
+    const posts = await Post.find({ userId: user._id }).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      Profile: {
+        user,
+        posts
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 
 router.get("/:username",verifyToken, async (req, res) => {
 

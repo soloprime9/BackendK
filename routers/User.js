@@ -68,7 +68,7 @@ router.post("/login", async (req, res) => {
 
 
 // GET /user/profile/:id
-router.get('/profile/:id',verifyToken,  async (req, res) => {
+router.get('/profile/:id',  async (req, res) => {
   try {
     const userId = req.params.id;
 

@@ -452,7 +452,7 @@ router.get("/post/:id", async (req, res) => {
                     $regex: hashtags.map(tag => tag.replace('#', '\\#')).join('|'),
                     $options: 'i'
                 }
-            }).limit(10);
+            }).limit(20);
         }
 
         // Step 4: Response bhej do

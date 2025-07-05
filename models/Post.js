@@ -12,6 +12,7 @@ const PostSchema = Schema ({
     url: String,
     type: String,
   },
+    mediaType: { type: String, required: true },
     // likes: [{type: String, default : 0}],
     likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
 

@@ -36,8 +36,12 @@ router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
     const { title, tags } = req.body;
 
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Determine mediaType from the uploaded file mimetype
+    const mediaType = file.mimetype; // e.g. 'video/mp4' or 'image/jpeg'
 
     const bucketId = '685fc9880036ec074baf';
     const fileId = ID.unique();
@@ -47,7 +51,7 @@ router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
       bucketId,
       fileId,
       input,
-      [ Permission.read(Role.any()) ] // Public read permission:contentReference[oaicite:4]{index=4}
+      [Permission.read(Role.any())] // Public read permission
     );
 
     const proj = client.config.project;
@@ -56,12 +60,14 @@ router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
     const mediaUrl = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/view?project=${proj}`;
     const thumbnail = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/preview?project=${proj}`;
 
+    // Save post with mediaType
     const newPost = new Post({
       userId,
       title,
       media: mediaUrl,
       thumbnail,
       tags: tags ? tags.split(',') : [],
+      mediaType,  // <-- Set mediaType here
       likes: [],
       comments: [],
     });

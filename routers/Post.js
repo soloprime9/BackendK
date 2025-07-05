@@ -250,13 +250,14 @@ router.get('/shorts', async (req, res) => {
   try {
     const total = await Post.countDocuments({ media: { $regex: /\.mp4$/i } });
 
-    const videos = await Post.find({ media: { $regex: /\.mp4$/i } })
-      .sort({ createdAt: -1 }) // assuming you have timestamps: true in schema
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'username')
-      .populate('comments', 'userId')
-      .populate('likes', 'userId');
+    const videos = await Post.find({ mediaType: { $regex: /^video\// } })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('userId', 'username')
+        .populate('comments', 'userId')
+        .populate('likes', 'userId');
+
 
     res.status(200).json({
       page,

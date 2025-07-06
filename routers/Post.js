@@ -25,131 +25,140 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
-  try {
-    const { file } = req;
-    const userId = req.user.UserId;
-    const { title, tags } = req.body;
+    const tmpDirPath = path.join(__dirname, "../tmp");
+    const tempInputPath = path.join(tmpDirPath, `input-${Date.now()}.mp4`);
+    const tempOutputPath = path.join(tmpDirPath, `output-${Date.now()}.mp4`);
+    const thumbnailPath = path.join(tmpDirPath, `thumb-${Date.now()}.png`);
 
-    if (!file) return res.status(400).json({ error: "No file uploaded" });
+    try {
+        const { file } = req;
+        const userId = req.user.UserId;
+        const { title, tags } = req.body;
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const mediaType = file.mimetype;
-    const isVideo = mediaType.startsWith("video");
-
-    if (!isVideo) return res.status(400).json({ error: "Only video files are allowed" });
-
-    // Save original buffer temporarily to disk
-    const tempInputPath = path.join(__dirname, `../tmp/input-${Date.now()}.mp4`);
-    const tempOutputPath = path.join(__dirname, `../tmp/output-${Date.now()}.mp4`);
-    fs.writeFileSync(tempInputPath, file.buffer);
-
-    // Check duration first
-    let durationInSeconds = 0;
-    await new Promise((resolve, reject) => {
-      ffmpeg.ffprobe(tempInputPath, (err, metadata) => {
-        if (err) return reject(err);
-        durationInSeconds = metadata.format.duration;
-        if (durationInSeconds > 60) {
-          fs.unlinkSync(tempInputPath);
-          return reject(new Error("Video too long. Max allowed is 60 seconds."));
+        if (!file) {
+            return res.status(400).json({ error: "No file uploaded" });
         }
-        resolve();
-      });
-    });
 
-    // Compress video to max 720p, H264 codec
-    await new Promise((resolve, reject) => {
-      ffmpeg(tempInputPath)
-        .videoCodec("libx264")
-        .audioCodec("aac")
-        .size("?x720")
-        .outputOptions(["-preset fast", "-crf 28"])
-        .on("end", resolve)
-        .on("error", reject)
-        .save(tempOutputPath);
-    });
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
 
-    // Read compressed video buffer
-    const compressedBuffer = fs.readFileSync(tempOutputPath);
-    const compressedSize = compressedBuffer.length;
+        const mediaType = file.mimetype;
+        const isVideo = mediaType.startsWith("video");
 
-    // Upload compressed video to Appwrite
-    const fileId = ID.unique();
-    const uploadedMedia = await storage.createFile(
-      BUCKET_ID,
-      fileId,
-      InputFile.fromBuffer(compressedBuffer, `compressed-${file.originalname}`),
-      [Permission.read(Role.any())]
-    );
+        if (!isVideo) {
+            return res.status(400).json({ error: "Only video files are allowed" });
+        }
 
-    const endpoint = client.config.endpoint;
-    const proj = client.config.project;
-    const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedMedia.$id}/view?project=${proj}`;
+        if (!fs.existsSync(tmpDirPath)) {
+            fs.mkdirSync(tmpDirPath, { recursive: true });
+        }
 
-    // Generate thumbnail from compressed video
-    const thumbnailPath = path.join(__dirname, `../tmp/thumb-${Date.now()}.png`);
-    await new Promise((resolve, reject) => {
-      ffmpeg(tempOutputPath)
-        .on("end", resolve)
-        .on("error", reject)
-        .screenshots({
-          timestamps: ["00:00:01.000"],
-          filename: path.basename(thumbnailPath),
-          folder: path.dirname(thumbnailPath),
-          size: "320x240",
+        fs.writeFileSync(tempInputPath, file.buffer);
+
+        let durationInSeconds = 0;
+        await new Promise((resolve, reject) => {
+            ffmpeg.ffprobe(tempInputPath, (err, metadata) => {
+                if (err) {
+                    return reject(err);
+                }
+                durationInSeconds = metadata.format.duration;
+                if (durationInSeconds > 60) {
+                    return reject(new Error("Video too long. Max allowed is 60 seconds."));
+                }
+                resolve();
+            });
         });
-    });
 
-    const thumbnailBuffer = fs.readFileSync(thumbnailPath);
-    const thumbFileId = ID.unique();
-    const uploadedThumb = await storage.createFile(
-      BUCKET_ID,
-      thumbFileId,
-      InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
-      [Permission.read(Role.any())]
-    );
+        await new Promise((resolve, reject) => {
+            ffmpeg(tempInputPath)
+                .videoCodec("libx264")
+                .audioCodec("aac")
+                .size("?x720")
+                .outputOptions(["-preset fast", "-crf 28"])
+                .on("end", resolve)
+                .on("error", reject)
+                .save(tempOutputPath);
+        });
 
-    const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${proj}`;
+        const compressedBuffer = fs.readFileSync(tempOutputPath);
+        const compressedSize = compressedBuffer.length;
 
-    // Save to MongoDB
-    const newPost = new Post({
-      userId,
-      title,
-      tags: tags ? tags.split(",") : [],
-      media: mediaUrl,
-      thumbnail: thumbnailUrl,
-      mediaType,
-      likes: [],
-      comments: [],
-      medias: {
-        url: mediaUrl,
-        type: mediaType,
-      },
-      duration: durationInSeconds,
-      size: compressedSize,
-    });
+        const fileId = ID.unique();
+        const uploadedMedia = await storage.createFile(
+            BUCKET_ID,
+            fileId,
+            InputFile.fromBuffer(compressedBuffer, `compressed-${file.originalname}`),
+            [Permission.read(Role.any())]
+        );
 
-    const savedPost = await newPost.save();
+        const endpoint = client.config.endpoint;
+        const proj = client.config.project;
+        const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedMedia.$id}/view?project=${proj}`;
 
-    // Cleanup temp files
-    fs.unlinkSync(tempInputPath);
-    fs.unlinkSync(tempOutputPath);
-    fs.unlinkSync(thumbnailPath);
+        await new Promise((resolve, reject) => {
+            ffmpeg(tempOutputPath)
+                .on("end", resolve)
+                .on("error", reject)
+                .screenshots({
+                    timestamps: ["00:00:01.000"],
+                    filename: path.basename(thumbnailPath),
+                    folder: path.dirname(thumbnailPath),
+                    size: "320x240",
+                });
+        });
 
-    res.status(200).json({
-      success: true,
-      post: savedPost,
-      mediaUrl,
-      thumbnail: thumbnailUrl,
-    });
-  } catch (err) {
-    console.error("Upload error:", err);
-    return res.status(500).json({ error: err.message });
-  }
+        const thumbnailBuffer = fs.readFileSync(thumbnailPath);
+        const thumbFileId = ID.unique();
+        const uploadedThumb = await storage.createFile(
+            BUCKET_ID,
+            thumbFileId,
+            InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
+            [Permission.read(Role.any())]
+        );
+
+        const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${proj}`;
+
+        const newPost = new Post({
+            userId,
+            title,
+            tags: tags ? tags.split(",").map(tag => tag.trim()) : [],
+            media: mediaUrl,
+            thumbnail: thumbnailUrl,
+            mediaType,
+            likes: [],
+            comments: [],
+            medias: {
+                url: mediaUrl,
+                type: mediaType,
+            },
+            duration: durationInSeconds,
+            size: compressedSize,
+        });
+
+        const savedPost = await newPost.save();
+
+        res.status(200).json({
+            success: true,
+            post: savedPost,
+            mediaUrl,
+            thumbnail: thumbnailUrl,
+        });
+    } catch (err) {
+        return res.status(500).json({ error: err.message });
+    } finally {
+        if (fs.existsSync(tempInputPath)) {
+            fs.unlinkSync(tempInputPath);
+        }
+        if (fs.existsSync(tempOutputPath)) {
+            fs.unlinkSync(tempOutputPath);
+        }
+        if (fs.existsSync(thumbnailPath)) {
+            fs.unlinkSync(thumbnailPath);
+        }
+    }
 });
-
 
 
 

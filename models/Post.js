@@ -8,10 +8,13 @@ const PostSchema = Schema ({
     media: {type: String, required: true}, //Cloudary give Url
     thumbnail: { type: String, default: "" },
     medias: {
-    public_id: String,
-    url: String,
-    type: String,
-  },
+          type: new Schema({
+            public_id: { type: String, default: "" },
+            url: { type: String, required: true },
+            type: { type: String, required: true }
+          }, { _id: false })  // ✅ _id: false = avoid nested _id
+        },
+
     mediaType: { type: String, required: true },
     // likes: [{type: String, default : 0}],
     likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],

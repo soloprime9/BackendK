@@ -6,7 +6,7 @@ const path = require("path");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 ffmpeg.setFfmpegPath(ffmpegPath);
- 
+
 const { InputFile } = require("node-appwrite/file");
 const { Client, Storage, ID, Permission, Role } = require("node-appwrite");
 
@@ -22,142 +22,140 @@ const client = new Client()
   .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
 
 const storage = new Storage(client);
-const BUCKET_ID = "685fc9880036ec074baf";
+const BUCKET_ID = "685fc9880036ec074baf"; // replace with your bucket ID
 
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
-    const tmpDirPath = path.join(__dirname, "../tmp");
-    const tempInputPath = path.join(tmpDirPath, `input-${Date.now()}.mp4`);
-    const tempOutputPath = path.join(tmpDirPath, `output-${Date.now()}.mp4`);
-    const thumbnailPath = path.join(tmpDirPath, `thumb-${Date.now()}.png`);
+  const tmpDirPath = path.join(__dirname, "../tmp");
 
-    try {
-        const { file } = req;
-        const userId = req.user.UserId;
-        const { title, tags } = req.body;
+  // Generate temp filenames
+  const timestamp = Date.now();
+  const tempInputPath = path.join(tmpDirPath, `input-${timestamp}.mp4`);
+  const tempOutputPath = path.join(tmpDirPath, `output-${timestamp}.mp4`);
+  const thumbnailPath = path.join(tmpDirPath, `thumb-${timestamp}.png`);
 
-        if (!file) {
-            return res.status(400).json({ error: "No file uploaded" });
-        }
+  try {
+    const { file } = req;
+    const userId = req.user.UserId;
+    const { title, tags } = req.body;
 
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ error: "User not found" });
-        }
+    if (!file) return res.status(400).json({ error: "No file uploaded" });
 
-        const mediaType = file.mimetype;
-        const isVideo = mediaType.startsWith("video");
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
 
-        if (!isVideo) {
-            return res.status(400).json({ error: "Only video files are allowed" });
-        }
-
-        if (!fs.existsSync(tmpDirPath)) {
-            fs.mkdirSync(tmpDirPath, { recursive: true });
-        }
-
-        fs.writeFileSync(tempInputPath, file.buffer);
-
-        let durationInSeconds = 0;
-        await new Promise((resolve, reject) => {
-            ffmpeg.ffprobe(tempInputPath, (err, metadata) => {
-                if (err) {
-                    return reject(err);
-                }
-                durationInSeconds = metadata.format.duration;
-                if (durationInSeconds > 60) {
-                    return reject(new Error("Video too long. Max allowed is 60 seconds."));
-                }
-                resolve();
-            });
-        });
-
-        await new Promise((resolve, reject) => {
-            ffmpeg(tempInputPath)
-                .videoCodec("libx264")
-                .audioCodec("aac")
-                .size("?x720")
-                .outputOptions(["-preset fast", "-crf 28"])
-                .on("end", resolve)
-                .on("error", reject)
-                .save(tempOutputPath);
-        });
-
-        const compressedBuffer = fs.readFileSync(tempOutputPath);
-        const compressedSize = compressedBuffer.length;
-
-        const fileId = ID.unique();
-        const uploadedMedia = await storage.createFile(
-            BUCKET_ID,
-            fileId,
-            InputFile.fromBuffer(compressedBuffer, `compressed-${file.originalname}`),
-            [Permission.read(Role.any())]
-        );
-
-        const endpoint = client.config.endpoint;
-        const proj = client.config.project;
-        const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedMedia.$id}/view?project=${proj}`;
-
-        await new Promise((resolve, reject) => {
-            ffmpeg(tempOutputPath)
-                .on("end", resolve)
-                .on("error", reject)
-                .screenshots({
-                    timestamps: ["00:00:01.000"],
-                    filename: path.basename(thumbnailPath),
-                    folder: path.dirname(thumbnailPath),
-                    size: "320x240",
-                });
-        });
-
-        const thumbnailBuffer = fs.readFileSync(thumbnailPath);
-        const thumbFileId = ID.unique();
-        const uploadedThumb = await storage.createFile(
-            BUCKET_ID,
-            thumbFileId,
-            InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
-            [Permission.read(Role.any())]
-        );
-
-        const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${proj}`;
-
-        const newPost = new Post({
-            userId,
-            title,
-            tags: tags ? tags.split(",").map(tag => tag.trim()) : [],
-            media: mediaUrl,
-            thumbnail: thumbnailUrl,
-            mediaType,
-            likes: [],
-            comments: [],
-            medias: {
-                url: mediaUrl,
-                type: mediaType,
-            },
-            duration: durationInSeconds,
-            size: compressedSize,
-        });
-
-        const savedPost = await newPost.save();
-
-        res.status(200).json({
-            success: true,
-            post: savedPost,
-            mediaUrl,
-            thumbnail: thumbnailUrl,
-        });
-    } catch (err) {
-        return res.status(500).json({ error: err.message });
-    } finally {
-        if (fs.existsSync(tempInputPath)) {
-            fs.unlinkSync(tempInputPath);
-        }
-        if (fs.existsSync(tempOutputPath)) {
-            fs.unlinkSync(tempOutputPath);
-        }
-        if (fs.existsSync(thumbnailPath)) {
-            fs.unlinkSync(thumbnailPath);
-        }
+    const mediaType = file.mimetype;
+    if (!mediaType.startsWith("video")) {
+      return res.status(400).json({ error: "Only video files are allowed" });
     }
+
+    // Create /tmp folder if it doesn't exist
+    if (!fs.existsSync(tmpDirPath)) {
+      fs.mkdirSync(tmpDirPath, { recursive: true });
+    }
+
+    // Save uploaded buffer to disk
+    fs.writeFileSync(tempInputPath, file.buffer);
+
+    // Get duration
+    let durationInSeconds = 0;
+    await new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(tempInputPath, (err, metadata) => {
+        if (err) return reject(err);
+        durationInSeconds = metadata.format.duration;
+        if (durationInSeconds > 60) {
+          return reject(new Error("Video too long. Max allowed is 60 seconds."));
+        }
+        resolve();
+      });
+    });
+
+    // Compress video
+    await new Promise((resolve, reject) => {
+      ffmpeg(tempInputPath)
+        .videoCodec("libx264")
+        .audioCodec("aac")
+        .size("?x720")
+        .outputOptions(["-preset fast", "-crf 28"])
+        .on("end", resolve)
+        .on("error", reject)
+        .save(tempOutputPath);
+    });
+
+    const compressedBuffer = fs.readFileSync(tempOutputPath);
+    const compressedSize = compressedBuffer.length;
+
+    // Upload video
+    const fileId = ID.unique();
+    const uploadedVideo = await storage.createFile(
+      BUCKET_ID,
+      fileId,
+      InputFile.fromBuffer(compressedBuffer, `compressed-${file.originalname}`),
+      [Permission.read(Role.any())]
+    );
+
+    const endpoint = client.config.endpoint;
+    const proj = client.config.project;
+    const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedVideo.$id}/view?project=${proj}`;
+
+    // Generate thumbnail
+    await new Promise((resolve, reject) => {
+      ffmpeg(tempOutputPath)
+        .on("end", resolve)
+        .on("error", reject)
+        .screenshots({
+          timestamps: ["00:00:01.000"],
+          filename: path.basename(thumbnailPath),
+          folder: path.dirname(thumbnailPath),
+          size: "320x240",
+        });
+    });
+
+    const thumbnailBuffer = fs.readFileSync(thumbnailPath);
+    const thumbFileId = ID.unique();
+    const uploadedThumb = await storage.createFile(
+      BUCKET_ID,
+      thumbFileId,
+      InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
+      [Permission.read(Role.any())]
+    );
+
+    const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${proj}`;
+
+    // Save to MongoDB
+    const newPost = new Post({
+      userId,
+      title,
+      tags: tags ? tags.split(",").map(tag => tag.trim()) : [],
+      media: mediaUrl,
+      thumbnail: thumbnailUrl,
+      mediaType,
+      likes: [],
+      comments: [],
+      medias: {
+        url: mediaUrl,
+        type: mediaType,
+      },
+      duration: durationInSeconds,
+      size: compressedSize,
+    });
+
+    const savedPost = await newPost.save();
+
+    res.status(200).json({
+      success: true,
+      post: savedPost,
+      mediaUrl,
+      thumbnail: thumbnailUrl,
+    });
+  } catch (err) {
+    console.error("Upload error:", err);
+    return res.status(500).json({ error: err.message || "Internal Server Error" });
+  } finally {
+    // Cleanup
+    [tempInputPath, tempOutputPath, thumbnailPath].forEach((f) => {
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    });
+  }
 });
 
 

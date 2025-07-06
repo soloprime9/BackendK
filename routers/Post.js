@@ -23,7 +23,7 @@ const client = new Client()
   .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
 
 const storage = new Storage(client);
-const BUCKET_ID = "685fc9880036ec074baf"; // Replace with your bucket ID
+const BUCKET_ID = "685fc9880036ec074baf";
 
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   const timestamp = Date.now();
@@ -38,18 +38,14 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
     if (!file) return res.status(400).json({ error: "No file uploaded" });
 
-    if (!fs.existsSync(tmpDir)) {
-      fs.mkdirSync(tmpDir, { recursive: true });
-    }
-
-    const mediaType = file.mimetype;
-    if (!mediaType.startsWith("video")) {
-      return res.status(400).json({ error: "Only video files are allowed" });
-    }
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
     fs.writeFileSync(inputPath, file.buffer);
 
-    // Upload original video
+    const mediaType = file.mimetype;
+    if (!mediaType.startsWith("video"))
+      return res.status(400).json({ error: "Only video files allowed" });
+
     const uploadedVideo = await storage.createFile(
       BUCKET_ID,
       ID.unique(),
@@ -59,10 +55,9 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
     const endpoint = client.config.endpoint;
     const project = client.config.project;
-
     const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedVideo.$id}/view?project=${project}`;
 
-    // Generate thumbnail from video (at 1 second)
+    // Generate thumbnail
     await new Promise((resolve, reject) => {
       ffmpeg(inputPath)
         .on("end", resolve)
@@ -75,18 +70,16 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
         });
     });
 
-    // Upload thumbnail
-    const thumbBuffer = fs.readFileSync(thumbPath);
+    const thumbnailBuffer = fs.readFileSync(thumbPath);
     const uploadedThumb = await storage.createFile(
       BUCKET_ID,
       ID.unique(),
-      InputFile.fromBuffer(thumbBuffer, "thumbnail.png"),
+      InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
       [Permission.read(Role.any())]
     );
 
     const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
 
-    // Save post
     const newPost = new Post({
       userId,
       title,
@@ -114,11 +107,11 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     console.error("🔥 Thumbnail-only upload error:", err);
     res.status(500).json({ error: err.message || "Internal Server Error" });
   } finally {
-    // Clean up files
     if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
     if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
   }
 });
+
 
 // // Cloudinary Configure
 // cloudinary.config({

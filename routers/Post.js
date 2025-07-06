@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -22,16 +23,13 @@ const client = new Client()
   .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
 
 const storage = new Storage(client);
-const BUCKET_ID = "685fc9880036ec074baf"; // replace with your bucket ID
+const BUCKET_ID = "685fc9880036ec074baf"; // Replace with your bucket ID
 
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
-  const tmpDirPath = path.join(__dirname, "../tmp");
-
-  // Generate temp filenames
   const timestamp = Date.now();
-  const tempInputPath = path.join(tmpDirPath, `input-${timestamp}.mp4`);
-  const tempOutputPath = path.join(tmpDirPath, `output-${timestamp}.mp4`);
-  const thumbnailPath = path.join(tmpDirPath, `thumb-${timestamp}.png`);
+  const tmpDir = path.join(__dirname, "../tmp");
+  const inputPath = path.join(tmpDir, `input-${timestamp}.mp4`);
+  const thumbPath = path.join(tmpDir, `thumb-${timestamp}.png`);
 
   try {
     const { file } = req;
@@ -40,88 +38,55 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
     if (!file) return res.status(400).json({ error: "No file uploaded" });
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
 
     const mediaType = file.mimetype;
     if (!mediaType.startsWith("video")) {
       return res.status(400).json({ error: "Only video files are allowed" });
     }
 
-    // Create /tmp folder if it doesn't exist
-    if (!fs.existsSync(tmpDirPath)) {
-      fs.mkdirSync(tmpDirPath, { recursive: true });
-    }
+    fs.writeFileSync(inputPath, file.buffer);
 
-    // Save uploaded buffer to disk
-    fs.writeFileSync(tempInputPath, file.buffer);
-
-    // Get duration
-    let durationInSeconds = 0;
-    await new Promise((resolve, reject) => {
-      ffmpeg.ffprobe(tempInputPath, (err, metadata) => {
-        if (err) return reject(err);
-        durationInSeconds = metadata.format.duration;
-        if (durationInSeconds > 60) {
-          return reject(new Error("Video too long. Max allowed is 60 seconds."));
-        }
-        resolve();
-      });
-    });
-
-    // Compress video
-    await new Promise((resolve, reject) => {
-      ffmpeg(tempInputPath)
-        .videoCodec("libx264")
-        .audioCodec("aac")
-        .size("?x720")
-        .outputOptions(["-preset fast", "-crf 28"])
-        .on("end", resolve)
-        .on("error", reject)
-        .save(tempOutputPath);
-    });
-
-    const compressedBuffer = fs.readFileSync(tempOutputPath);
-    const compressedSize = compressedBuffer.length;
-
-    // Upload video
-    const fileId = ID.unique();
+    // Upload original video
     const uploadedVideo = await storage.createFile(
       BUCKET_ID,
-      fileId,
-      InputFile.fromBuffer(compressedBuffer, `compressed-${file.originalname}`),
+      ID.unique(),
+      InputFile.fromBuffer(file.buffer, file.originalname),
       [Permission.read(Role.any())]
     );
 
     const endpoint = client.config.endpoint;
-    const proj = client.config.project;
-    const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedVideo.$id}/view?project=${proj}`;
+    const project = client.config.project;
 
-    // Generate thumbnail
+    const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedVideo.$id}/view?project=${project}`;
+
+    // Generate thumbnail from video (at 1 second)
     await new Promise((resolve, reject) => {
-      ffmpeg(tempOutputPath)
+      ffmpeg(inputPath)
         .on("end", resolve)
         .on("error", reject)
         .screenshots({
           timestamps: ["00:00:01.000"],
-          filename: path.basename(thumbnailPath),
-          folder: path.dirname(thumbnailPath),
+          filename: path.basename(thumbPath),
+          folder: path.dirname(thumbPath),
           size: "320x240",
         });
     });
 
-    const thumbnailBuffer = fs.readFileSync(thumbnailPath);
-    const thumbFileId = ID.unique();
+    // Upload thumbnail
+    const thumbBuffer = fs.readFileSync(thumbPath);
     const uploadedThumb = await storage.createFile(
       BUCKET_ID,
-      thumbFileId,
-      InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
+      ID.unique(),
+      InputFile.fromBuffer(thumbBuffer, "thumbnail.png"),
       [Permission.read(Role.any())]
     );
 
-    const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${proj}`;
+    const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
 
-    // Save to MongoDB
+    // Save post
     const newPost = new Post({
       userId,
       title,
@@ -135,8 +100,6 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
         url: mediaUrl,
         type: mediaType,
       },
-      duration: durationInSeconds,
-      size: compressedSize,
     });
 
     const savedPost = await newPost.save();
@@ -148,17 +111,14 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       thumbnail: thumbnailUrl,
     });
   } catch (err) {
-    console.error("Upload error:", err);
-    return res.status(500).json({ error: err.message || "Internal Server Error" });
+    console.error("🔥 Thumbnail-only upload error:", err);
+    res.status(500).json({ error: err.message || "Internal Server Error" });
   } finally {
-    // Cleanup
-    [tempInputPath, tempOutputPath, thumbnailPath].forEach((f) => {
-      if (fs.existsSync(f)) fs.unlinkSync(f);
-    });
+    // Clean up files
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+    if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
   }
 });
-
-
 
 // // Cloudinary Configure
 // cloudinary.config({

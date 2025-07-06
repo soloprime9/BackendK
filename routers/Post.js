@@ -1,22 +1,18 @@
 const express = require("express");
 const router = express.Router();
-const Post = require("../models/Post");
-
-const verifyToken = require("../middleware/verifyToken");
-const User = require("../models/User");
-const { v2: cloudinary } = require("cloudinary");
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
-require("dotenv").config();
 const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+const { InputFile } = require("node-appwrite/file");
 const { Client, Storage, ID, Permission, Role } = require("node-appwrite");
 
-
-
-
-
-const { InputFile } = require('node-appwrite/file');
-
-
+const verifyToken = require("../middleware/verifyToken");
+const Post = require("../models/Post");
+const User = require("../models/User");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -26,66 +22,133 @@ const client = new Client()
   .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
 
 const storage = new Storage(client);
+const BUCKET_ID = "685fc9880036ec074baf";
 
-
-
-router.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
+router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   try {
     const { file } = req;
     const userId = req.user.UserId;
     const { title, tags } = req.body;
 
-    if (!file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!file) return res.status(400).json({ error: "No file uploaded" });
 
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) return res.status(404).json({ error: "User not found" });
 
-    // Determine mediaType from the uploaded file mimetype
-    const mediaType = file.mimetype; // e.g. 'video/mp4' or 'image/jpeg'
+    const mediaType = file.mimetype;
+    const isVideo = mediaType.startsWith("video");
 
-    const bucketId = '685fc9880036ec074baf';
+    if (!isVideo) return res.status(400).json({ error: "Only video files are allowed" });
+
+    // Save original buffer temporarily to disk
+    const tempInputPath = path.join(__dirname, `../tmp/input-${Date.now()}.mp4`);
+    const tempOutputPath = path.join(__dirname, `../tmp/output-${Date.now()}.mp4`);
+    fs.writeFileSync(tempInputPath, file.buffer);
+
+    // Check duration first
+    let durationInSeconds = 0;
+    await new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(tempInputPath, (err, metadata) => {
+        if (err) return reject(err);
+        durationInSeconds = metadata.format.duration;
+        if (durationInSeconds > 60) {
+          fs.unlinkSync(tempInputPath);
+          return reject(new Error("Video too long. Max allowed is 60 seconds."));
+        }
+        resolve();
+      });
+    });
+
+    // Compress video to max 720p, H264 codec
+    await new Promise((resolve, reject) => {
+      ffmpeg(tempInputPath)
+        .videoCodec("libx264")
+        .audioCodec("aac")
+        .size("?x720")
+        .outputOptions(["-preset fast", "-crf 28"])
+        .on("end", resolve)
+        .on("error", reject)
+        .save(tempOutputPath);
+    });
+
+    // Read compressed video buffer
+    const compressedBuffer = fs.readFileSync(tempOutputPath);
+    const compressedSize = compressedBuffer.length;
+
+    // Upload compressed video to Appwrite
     const fileId = ID.unique();
-    const input = InputFile.fromBuffer(file.buffer, file.originalname);
-
-    const uploaded = await storage.createFile(
-      bucketId,
+    const uploadedMedia = await storage.createFile(
+      BUCKET_ID,
       fileId,
-      input,
-      [Permission.read(Role.any())] // Public read permission
+      InputFile.fromBuffer(compressedBuffer, `compressed-${file.originalname}`),
+      [Permission.read(Role.any())]
     );
 
+    const endpoint = client.config.endpoint;
     const proj = client.config.project;
-    const endpoint = client.config.endpoint; // includes '/v1'
+    const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedMedia.$id}/view?project=${proj}`;
 
-    const mediaUrl = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/view?project=${proj}`;
-    const thumbnail = `${endpoint}/storage/buckets/${bucketId}/files/${uploaded.$id}/preview?project=${proj}`;
+    // Generate thumbnail from compressed video
+    const thumbnailPath = path.join(__dirname, `../tmp/thumb-${Date.now()}.png`);
+    await new Promise((resolve, reject) => {
+      ffmpeg(tempOutputPath)
+        .on("end", resolve)
+        .on("error", reject)
+        .screenshots({
+          timestamps: ["00:00:01.000"],
+          filename: path.basename(thumbnailPath),
+          folder: path.dirname(thumbnailPath),
+          size: "320x240",
+        });
+    });
 
-    // Save post with mediaType
+    const thumbnailBuffer = fs.readFileSync(thumbnailPath);
+    const thumbFileId = ID.unique();
+    const uploadedThumb = await storage.createFile(
+      BUCKET_ID,
+      thumbFileId,
+      InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
+      [Permission.read(Role.any())]
+    );
+
+    const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${proj}`;
+
+    // Save to MongoDB
     const newPost = new Post({
       userId,
       title,
+      tags: tags ? tags.split(",") : [],
       media: mediaUrl,
-      thumbnail,
-      tags: tags ? tags.split(',') : [],
-      mediaType,  // <-- Set mediaType here
+      thumbnail: thumbnailUrl,
+      mediaType,
       likes: [],
       comments: [],
+      medias: {
+        url: mediaUrl,
+        type: mediaType,
+      },
+      duration: durationInSeconds,
+      size: compressedSize,
     });
 
     const savedPost = await newPost.save();
+
+    // Cleanup temp files
+    fs.unlinkSync(tempInputPath);
+    fs.unlinkSync(tempOutputPath);
+    fs.unlinkSync(thumbnailPath);
 
     res.status(200).json({
       success: true,
       post: savedPost,
       mediaUrl,
-      thumbnail,
+      thumbnail: thumbnailUrl,
     });
   } catch (err) {
-    console.error('Route error:', err);
-    res.status(500).json({ error: err.message });
+    console.error("Upload error:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
-
 
 
 

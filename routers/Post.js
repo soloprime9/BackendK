@@ -409,6 +409,27 @@ router.post("/comment/:postId", verifyToken, async(req, res) =>{
 })
 
 
+router.get("/comment/:postId", async (req, res) => {
+    try {
+        const postId = req.params.postId;
+        const post = await Post.findById(postId).populate({
+            path: 'comments.userId', // Populate the userId field within the comments array
+            select: 'username profilePicture' // Select fields you want to return for the user
+        });
+
+        if (!post) {
+            return res.status(404).json("Post Not Found");
+        }
+
+        // Return only the comments array
+        res.status(200).json(post.comments);
+    } catch (error) {
+        console.error("Error fetching comments:", error);
+        res.status(500).json({ message: "Server Error", error: error.message });
+    }
+});
+
+
 router.get("/single/:id", async(req, res) =>{
     
    try{

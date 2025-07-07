@@ -1,11 +1,20 @@
 const { Schema, model } = require("../connection");
 
+const ReplySchema = new Schema({
+  userId: { type: Schema.Types.ObjectId, ref: "User" },
+  replyText: { type: String, required: true },
+  likes: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
+}, { _id: true });
+
 const CommentSchema = new Schema({
   CommentText: { type: String, required: true },
   userId: { type: Schema.Types.ObjectId, ref: "User" },
   likes: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now }
-}, { _id: false });
+  createdAt: { type: Date, default: Date.now },
+  replies: [ReplySchema]  // ✅ Nested replies supported
+}, { _id: true });
+
 
 const PostSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User" },

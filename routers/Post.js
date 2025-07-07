@@ -367,10 +367,9 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
     }
 });
 
-router.post("/comment/:postId",verifyToken, async (req, res) => {
+router.post("/comment/:postId", async (req, res) => {
   try {
-    const userId = req.user.UserId;
-    const CommentText = req.body.CommentText;
+    const { userId, CommentText } = req.body; // Destructure userId and CommentText from the request body
     const postId = req.params.postId;
 
     const post = await Post.findById(postId);
@@ -382,11 +381,11 @@ router.post("/comment/:postId",verifyToken, async (req, res) => {
       userId,
       CommentText,
       likes: 0,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
-    post.comments.push(comment); // ✅ no need for await here
-    await post.save(); // ✅ Must await saving
+    post.comments.push(comment);
+    await post.save();
 
     res.status(200).json(post);
   } catch (error) {
@@ -394,6 +393,7 @@ router.post("/comment/:postId",verifyToken, async (req, res) => {
     res.status(500).json(error.message || "Server Error");
   }
 });
+
 
 
 

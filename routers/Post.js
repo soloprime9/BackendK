@@ -367,66 +367,54 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
     }
 });
 
-router.post("/comment/:postId", verifyToken, async(req, res) =>{
-    try{
+router.post("/comment/:postId", verifyToken, async (req, res) => {
+  try {
     const userId = req.user.UserId;
     const CommentText = req.body.CommentText;
     const postId = req.params.postId;
-    
+
     const post = await Post.findById(postId);
-    if(!post){
-        return res.status(404).json("Post Not Found");
-        
+    if (!post) {
+      return res.status(404).json("Post Not Found");
     }
 
-    console.log(post);
+    const comment = {
+      userId,
+      CommentText,
+      likes: 0,
+      createdAt: new Date()
+    };
 
-    // const CheckUser = post.comments.includes(userId);
-    // if(CheckUser){
-    //     post.comments = post.comments.filter((id) => id != userId);
-    //     post.comments.save();
-    //     console.log("")
-    // }
+    post.comments.push(comment); // ✅ no need for await here
+    await post.save(); // ✅ Must await saving
 
-    const comment = ({
-        userId: userId,
-        CommentText: CommentText,
-        like: [],
-
-    })
-
-    await post.comments.push(comment);
-    post.save();
     res.status(200).json(post);
-    console.log("Comments: ", post);
-    }
+  } catch (error) {
+    console.error("Error adding comment:", error);
+    res.status(500).json(error.message || "Server Error");
+  }
+});
 
-    catch(error){
-        res.status(500).json(error);
-        console.log(error);
-    }
-
-})
 
 
 router.get("/comment/:postId", async (req, res) => {
-    try {
-        const postId = req.params.postId;
-        const post = await Post.findById(postId).populate({
-            path: 'comments.userId', // Populate the userId field within the comments array
-            select: 'username profilePicture' // Select fields you want to return for the user
-        });
+  try {
+    const postId = req.params.postId;
 
-        if (!post) {
-            return res.status(404).json("Post Not Found");
-        }
+    const post = await Post.findById(postId).populate({
+      path: 'comments.userId',
+      select: 'username profilePicture'
+    });
 
-        // Return only the comments array
-        res.status(200).json(post.comments);
-    } catch (error) {
-        console.error("Error fetching comments:", error);
-        res.status(500).json({ message: "Server Error", error: error.message });
+    if (!post) {
+      return res.status(404).json("Post Not Found");
     }
+
+    res.status(200).json(post.comments);
+  } catch (error) {
+    console.error("Error fetching comments:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
 });
 
 

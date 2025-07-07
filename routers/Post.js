@@ -367,7 +367,7 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
     }
 });
 
-router.post("/comment/:postId", verifyToken, async (req, res) => {
+router.post("/comment/:postId",verifyToken, async (req, res) => {
   try {
     const userId = req.user.UserId;
     const CommentText = req.body.CommentText;

@@ -1,7 +1,122 @@
+// const express = require("express");
+// const router = express.Router();
+// const multer = require("multer");
+// const fs = require("fs");
+// const path = require("path");
+
+// const ffmpeg = require("fluent-ffmpeg");
+// const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+// ffmpeg.setFfmpegPath(ffmpegPath);
+
+// const { InputFile } = require("node-appwrite/file");
+// const { Client, Storage, ID, Permission, Role } = require("node-appwrite");
+
+// const verifyToken = require("../middleware/verifyToken");
+// const Post = require("../models/Post");
+// const User = require("../models/User");
+
+// const upload = multer({ storage: multer.memoryStorage() });
+
+// const client = new Client()
+//   .setEndpoint('https://nyc.cloud.appwrite.io/v1')
+//   .setProject('fondpeace')
+//   .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
+
+// const storage = new Storage(client);
+// const BUCKET_ID = "685fc9880036ec074baf";
+
+// router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
+//   const timestamp = Date.now();
+//   const tmpDir = path.join(__dirname, "../tmp");
+//   const inputPath = path.join(tmpDir, `input-${timestamp}.mp4`);
+//   const thumbPath = path.join(tmpDir, `thumb-${timestamp}.png`);
+
+//   try {
+//     const { file } = req;
+//     const userId = req.user.UserId;
+//     const { title, tags } = req.body;
+
+//     if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+//     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+//     fs.writeFileSync(inputPath, file.buffer);
+
+//     const mediaType = file.mimetype;
+//     if (!mediaType.startsWith("video"))
+//       return res.status(400).json({ error: "Only video files allowed" });
+
+//     const uploadedVideo = await storage.createFile(
+//       BUCKET_ID,
+//       ID.unique(),
+//       InputFile.fromBuffer(file.buffer, file.originalname),
+//       [Permission.read(Role.any())]
+//     );
+
+//     const endpoint = client.config.endpoint;
+//     const project = client.config.project;
+//     const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedVideo.$id}/view?project=${project}`;
+
+//     // Generate thumbnail
+//     await new Promise((resolve, reject) => {
+//       ffmpeg(inputPath)
+//         .on("end", resolve)
+//         .on("error", reject)
+//         .screenshots({
+//           timestamps: ["00:00:01.000"],
+//           filename: path.basename(thumbPath),
+//           folder: path.dirname(thumbPath),
+//           size: "320x240",
+//         });
+//     });
+
+//     const thumbnailBuffer = fs.readFileSync(thumbPath);
+//     const uploadedThumb = await storage.createFile(
+//       BUCKET_ID,
+//       ID.unique(),
+//       InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
+//       [Permission.read(Role.any())]
+//     );
+
+//     const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
+
+//     const newPost = new Post({
+//       userId,
+//       title,
+//       tags: tags ? tags.split(",").map(tag => tag.trim()) : [],
+//       media: mediaUrl,
+//       thumbnail: thumbnailUrl,
+//       mediaType,
+//       likes: [],
+//       comments: [],
+//       medias: {
+//         url: mediaUrl,
+//         type: mediaType,
+//       },
+//     });
+
+//     const savedPost = await newPost.save();
+
+//     res.status(200).json({
+//       success: true,
+//       post: savedPost,
+//       mediaUrl,
+//       thumbnail: thumbnailUrl,
+//     });
+//   } catch (err) {
+//     console.error("🔥 Thumbnail-only upload error:", err);
+//     res.status(500).json({ error: err.message || "Internal Server Error" });
+//   } finally {
+//     if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+//     if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
+//   }
+// });
+
+
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const fs = require("fs");
+const fs = require("fs"); // Still needed for potential in-memory buffer operations if direct stream is not feasible with ffmpeg
 const path = require("path");
 
 const ffmpeg = require("fluent-ffmpeg");
@@ -26,10 +141,8 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
-  const timestamp = Date.now();
-  const tmpDir = path.join(__dirname, "../tmp");
-  const inputPath = path.join(tmpDir, `input-${timestamp}.mp4`);
-  const thumbPath = path.join(tmpDir, `thumb-${timestamp}.png`);
+  let mediaUrl;
+  let thumbnailUrl;
 
   try {
     const { file } = req;
@@ -38,15 +151,10 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
     if (!file) return res.status(400).json({ error: "No file uploaded" });
 
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-
-    fs.writeFileSync(inputPath, file.buffer);
-
     const mediaType = file.mimetype;
-    if (!mediaType.startsWith("video"))
-      return res.status(400).json({ error: "Only video files allowed" });
 
-    const uploadedVideo = await storage.createFile(
+    // Upload the main file (video or image)
+    const uploadedFile = await storage.createFile(
       BUCKET_ID,
       ID.unique(),
       InputFile.fromBuffer(file.buffer, file.originalname),
@@ -55,30 +163,57 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
     const endpoint = client.config.endpoint;
     const project = client.config.project;
-    const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedVideo.$id}/view?project=${project}`;
+    mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedFile.$id}/view?project=${project}`;
 
-    // Generate thumbnail
-    await new Promise((resolve, reject) => {
-      ffmpeg(inputPath)
-        .on("end", resolve)
-        .on("error", reject)
-        .screenshots({
-          timestamps: ["00:00:01.000"],
-          filename: path.basename(thumbPath),
-          folder: path.dirname(thumbPath),
-          size: "320x240",
-        });
-    });
+    if (mediaType.startsWith("video")) {
+      // Generate thumbnail for video
+      const buffers = [];
+      await new Promise((resolve, reject) => {
+        ffmpeg()
+          .input(require('stream').Readable.from(file.buffer)) // Input directly from buffer
+          .on("end", () => {
+            console.log("Thumbnail generation finished");
+            resolve();
+          })
+          .on("error", (err) => {
+            console.error("Error generating thumbnail:", err);
+            reject(err);
+          })
+          .outputOptions([
+            "-vf", "thumbnail",
+            "-frames:v", "1",
+            "-s", "320x240" // Specify thumbnail size
+          ])
+          .outputFormat("image2pipe")
+          .pipe()
+          .on('data', (chunk) => buffers.push(chunk))
+          .on('end', () => {
+            // This is crucial: collect all data chunks into a single buffer
+            // and resolve the promise after all chunks have been received.
+            // The actual Appwrite upload will happen outside this promise.
+          })
+          .on('close', () => { // Use 'close' for when the pipe finishes
+            // This 'close' event handler is where you should resolve the promise
+            // and perform the Appwrite upload with the collected buffer.
+            // However, the Appwrite upload should happen AFTER the Promise resolves.
+          });
+      });
 
-    const thumbnailBuffer = fs.readFileSync(thumbPath);
-    const uploadedThumb = await storage.createFile(
-      BUCKET_ID,
-      ID.unique(),
-      InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
-      [Permission.read(Role.any())]
-    );
+      const thumbnailBuffer = Buffer.concat(buffers); // Concatenate all collected chunks
+      const uploadedThumb = await storage.createFile(
+        BUCKET_ID,
+        ID.unique(),
+        InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
+        [Permission.read(Role.any())]
+      );
+      thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
 
-    const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
+    } else if (mediaType.startsWith("image")) {
+      // For images, the media URL is the thumbnail URL
+      thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedFile.$id}/preview?project=${project}`;
+    } else {
+      return res.status(400).json({ error: "Unsupported file type. Only videos and images are allowed." });
+    }
 
     const newPost = new Post({
       userId,
@@ -104,11 +239,8 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       thumbnail: thumbnailUrl,
     });
   } catch (err) {
-    console.error("🔥 Thumbnail-only upload error:", err);
+    console.error("🔥 Upload error:", err);
     res.status(500).json({ error: err.message || "Internal Server Error" });
-  } finally {
-    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-    if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
   }
 });
 

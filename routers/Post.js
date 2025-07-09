@@ -466,32 +466,29 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
     const postId = req.params.postId;
 
     const post = await Post.findById(postId);
-
-    if (!post) {
-      return res.status(404).json("Post not found");
-    }
+    if (!post) return res.status(404).json("Post not found");
 
     const isLiked = post.likes.includes(UserId);
 
+    let update;
     if (isLiked) {
-      post.likes = post.likes.filter((id) => id != UserId);
+      update = { $pull: { likes: UserId } };
     } else {
-      post.likes.push(UserId);
+      update = { $push: { likes: UserId } };
     }
 
-    // ✅ Tell Mongoose that likes was modified
-    post.markModified("likes");
+    await Post.updateOne({ _id: postId }, update);
 
-    // ✅ Save without triggering mediaType validation
-    await post.save();
+    const updatedPost = await Post.findById(postId); // Fetch updated post if needed
 
-    res.status(200).json(post);
-    console.log(isLiked ? "Unliked:" : "Liked:", post.likes);
+    res.status(200).json(updatedPost);
+    console.log(isLiked ? "Unliked:" : "Liked:", updatedPost.likes);
   } catch (error) {
     console.log(error);
     return res.status(500).json(error.message || "Server error");
   }
 });
+
 
 
 router.post("/comment/:postId", verifyToken, async (req, res) => {

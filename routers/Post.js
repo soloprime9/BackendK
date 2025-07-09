@@ -461,43 +461,38 @@ router.get('/shorts', async (req, res) => {
 
 
 router.post("/like/:postId", verifyToken, async (req, res) => {
-    try {
-        const UserId = req.user.UserId;
-        const postId = req.params.postId;
-        const like = await Post.findById(postId);
-        
-        if (!like) {
-            return res.status(404).json("Post not found");
-        }
+  try {
+    const UserId = req.user.UserId;
+    const postId = req.params.postId;
 
-        // Ensure the 'likes' array exists (it should, if your schema is set up correctly)
-        // if (!like.likes) {
-        //     like.likes = [];
-        // }
+    const post = await Post.findById(postId);
 
-        const UserExist = like.likes.includes(UserId);
-        if (UserExist) {
-            like.likes = like.likes.filter((id) => id != UserId);
-            await like.save();
-            
-
-            
-            console.log("unlike: ", like.likes);
-        } else {
-            like.likes.push(UserId);
-            await like.save();
-            console.log("like: ", like.likes);
-        }
-
-        
-         res.status(200).json(like);
-         console.log(like);
-        
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json(error);
+    if (!post) {
+      return res.status(404).json("Post not found");
     }
+
+    const isLiked = post.likes.includes(UserId);
+
+    if (isLiked) {
+      post.likes = post.likes.filter((id) => id != UserId);
+    } else {
+      post.likes.push(UserId);
+    }
+
+    // ✅ Tell Mongoose that likes was modified
+    post.markModified("likes");
+
+    // ✅ Save without triggering mediaType validation
+    await post.save();
+
+    res.status(200).json(post);
+    console.log(isLiked ? "Unliked:" : "Liked:", post.likes);
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json(error.message || "Server error");
+  }
 });
+
 
 router.post("/comment/:postId", verifyToken, async (req, res) => {
   try {

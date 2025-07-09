@@ -518,7 +518,8 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
     };
 
     post.comments.push(comment);
-    await post.save();
+    await post.save({ validateModifiedOnly: true });
+
 
     res.status(200).json(post);
   } catch (error) {

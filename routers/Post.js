@@ -367,7 +367,10 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
 router.get("/mango/getall", async (req, res) => {
     try {
-      const posts = await Post.find({}).populate("userId", "username").populate("comments", "userId");
+      const posts = await Post.find()
+      .populate("userId", "username profilePic")
+      .populate("comments.userId", "username profilePic")
+      .populate("comments.replies.userId", "username profilePic");
       
       
   

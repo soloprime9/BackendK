@@ -462,7 +462,6 @@ router.get('/shorts', async (req, res) => {
 
 // })
 
-
 router.post("/like/:postId", verifyToken, async (req, res) => {
   try {
     const UserId = req.user.UserId;
@@ -472,20 +471,14 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
     if (!post) return res.status(404).json("Post not found");
 
     const isLiked = post.likes.includes(UserId);
-
-    let update;
-    if (isLiked) {
-      update = { $pull: { likes: UserId } };
-    } else {
-      update = { $push: { likes: UserId } };
-    }
+    const update = isLiked
+      ? { $pull: { likes: UserId } }
+      : { $push: { likes: UserId } };
 
     await Post.updateOne({ _id: postId }, update);
 
-    const updatedPost = await Post.findById(postId); // Fetch updated post if needed
-
-    res.status(200).json(updatedPost);
-    console.log(isLiked ? "Unliked:" : "Liked:", updatedPost.likes);
+    const updatedPost = await Post.findById(postId).select("likes"); // only likes
+    return res.status(200).json({ likes: updatedPost.likes });
   } catch (error) {
     console.log(error);
     return res.status(500).json(error.message || "Server error");
@@ -497,13 +490,11 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
 router.post("/comment/:postId", verifyToken, async (req, res) => {
   try {
     const CommentText = req.body.CommentText;
-    const userId = req.user.UserId; // from decoded token
+    const userId = req.user.UserId;
     const postId = req.params.postId;
 
     const post = await Post.findById(postId);
-    if (!post) {
-      return res.status(404).json("Post Not Found");
-    }
+    if (!post) return res.status(404).json("Post Not Found");
 
     const comment = {
       UserId: userId,
@@ -515,13 +506,85 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
     post.comments.push(comment);
     await post.save({ validateModifiedOnly: true });
 
+    // Fetch the last comment with populated user info
+    const newComment = post.comments[post.comments.length - 1];
+    const populatedComment = await Post.findOne(
+      { _id: postId },
+      { comments: { $slice: -1 } }
+    )
+      .populate("comments.UserId", "username profilePic")
+      .then((p) => p.comments[0]);
 
-    res.status(200).json(post);
+    return res.status(200).json({ comment: populatedComment });
   } catch (error) {
     console.error("Error adding comment:", error);
     res.status(500).json(error.message || "Server Error");
   }
 });
+
+
+
+
+// router.post("/like/:postId", verifyToken, async (req, res) => {
+//   try {
+//     const UserId = req.user.UserId;
+//     const postId = req.params.postId;
+
+//     const post = await Post.findById(postId);
+//     if (!post) return res.status(404).json("Post not found");
+
+//     const isLiked = post.likes.includes(UserId);
+
+//     let update;
+//     if (isLiked) {
+//       update = { $pull: { likes: UserId } };
+//     } else {
+//       update = { $push: { likes: UserId } };
+//     }
+
+//     await Post.updateOne({ _id: postId }, update);
+
+//     const updatedPost = await Post.findById(postId); // Fetch updated post if needed
+
+//     res.status(200).json(updatedPost);
+//     console.log(isLiked ? "Unliked:" : "Liked:", updatedPost.likes);
+//   } catch (error) {
+//     console.log(error);
+//     return res.status(500).json(error.message || "Server error");
+//   }
+// });
+
+
+
+
+// router.post("/comment/:postId", verifyToken, async (req, res) => {
+//   try {
+//     const CommentText = req.body.CommentText;
+//     const userId = req.user.UserId; // from decoded token
+//     const postId = req.params.postId;
+
+//     const post = await Post.findById(postId);
+//     if (!post) {
+//       return res.status(404).json("Post Not Found");
+//     }
+
+//     const comment = {
+//       UserId: userId,
+//       CommentText,
+//       likes: 0,
+//       createdAt: new Date(),
+//     };
+
+//     post.comments.push(comment);
+//     await post.save({ validateModifiedOnly: true });
+
+
+//     res.status(200).json(post);
+//   } catch (error) {
+//     console.error("Error adding comment:", error);
+//     res.status(500).json(error.message || "Server Error");
+//   }
+// });
 
 
 // router.post("/comment/:postId", async (req, res) => {

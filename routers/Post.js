@@ -431,96 +431,96 @@ router.get('/shorts', async (req, res) => {
 });
 
 
-// router.post("/like/:postId", verifyToken, async(req, res) => {
+router.post("/like/:postId", verifyToken, async(req, res) => {
     
-//     try{
-//     const UserId = req.user.UserId;
-//     console.log(UserId);
-//     const postId = req.params.postId;
-//     const like = await Post.findById(postId);
-//     if(!like){
-//         res.status(404).json("Post is not Found");
-//     }
-    
-
-//     const UserExist = like.likes.includes(UserId);
-//     if(UserExist){
-//         like.likes = like.likes.filter((id) => id !== UserId);
-//     }
-//     else{
-//         like.likes.push(UserId);
-//     }
-
-//     await like.save();    
-//     await res.status(200).json(like);
-    
-//     }
-//     catch(error){
-//         res.status(500).json(error);
-//         console.log(error);
-//     }
-
-// })
-
-router.post("/like/:postId", verifyToken, async (req, res) => {
-  try {
+    try{
     const UserId = req.user.UserId;
+    console.log(UserId);
     const postId = req.params.postId;
+    const like = await Post.findById(postId);
+    if(!like){
+        res.status(404).json("Post is not Found");
+    }
+    
 
-    const post = await Post.findById(postId);
-    if (!post) return res.status(404).json("Post not found");
+    const UserExist = like.likes.includes(UserId);
+    if(UserExist){
+        like.likes = like.likes.filter((id) => id !== UserId);
+    }
+    else{
+        like.likes.push(UserId);
+    }
 
-    const isLiked = post.likes.includes(UserId);
-    const update = isLiked
-      ? { $pull: { likes: UserId } }
-      : { $push: { likes: UserId } };
+    await like.save();    
+    await res.status(200).json(like);
+    
+    }
+    catch(error){
+        res.status(500).json(error);
+        console.log(error);
+    }
 
-    await Post.updateOne({ _id: postId }, update);
+})
 
-    const updatedPost = await Post.findById(postId).select("likes"); // only likes
-    return res.status(200).json({ likes: updatedPost.likes });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json(error.message || "Server error");
-  }
-});
+// router.post("/like/:postId", verifyToken, async (req, res) => {
+//   try {
+//     const UserId = req.user.UserId;
+//     const postId = req.params.postId;
+
+//     const post = await Post.findById(postId);
+//     if (!post) return res.status(404).json("Post not found");
+
+//     const isLiked = post.likes.includes(UserId);
+//     const update = isLiked
+//       ? { $pull: { likes: UserId } }
+//       : { $push: { likes: UserId } };
+
+//     await Post.updateOne({ _id: postId }, update);
+
+//     const updatedPost = await Post.findById(postId).select("likes"); // only likes
+//     return res.status(200).json({ likes: updatedPost.likes });
+//   } catch (error) {
+//     console.log(error);
+//     return res.status(500).json(error.message || "Server error");
+//   }
+// });
 
 
 
-router.post("/comment/:postId", verifyToken, async (req, res) => {
-  try {
-    const CommentText = req.body.CommentText;
-    const userId = req.user.UserId;
-    const postId = req.params.postId;
+// router.post("/comment/:postId", verifyToken, async (req, res) => {
+//   try {
+//     const CommentText = req.body.CommentText;
+//     const userId = req.user.UserId;
+//     const postId = req.params.postId;
 
-    const post = await Post.findById(postId);
-    if (!post) return res.status(404).json("Post Not Found");
+//     const post = await Post.findById(postId);
+//     if (!post) return res.status(404).json("Post Not Found");
 
-    const comment = {
-      UserId: userId,
-      CommentText,
-      likes: 0,
-      createdAt: new Date(),
-    };
+//     const comment = {
+//       UserId: userId,
+//       CommentText,
+//       likes: 0,
+//       createdAt: new Date(),
+//     };
 
-    post.comments.push(comment);
-    await post.save({ validateModifiedOnly: true });
+//     post.comments.push(comment);
+//     await post.save({ validateModifiedOnly: true });
 
-    // Fetch the last comment with populated user info
-    const newComment = post.comments[post.comments.length - 1];
-    const populatedComment = await Post.findOne(
-      { _id: postId },
-      { comments: { $slice: -1 } }
-    )
-      .populate("comments.UserId", "username profilePic")
-      .then((p) => p.comments[0]);
+//     // Fetch the last comment with populated user info
+//     const newComment = post.comments[post.comments.length - 1];
+//     const populatedComment = await Post.findOne(
+//       { _id: postId },
+//       { comments: { $slice: -1 } }
+//     )
+//       .populate("comments.UserId", "username profilePic")
+//       .then((p) => p.comments[0]);
 
-    return res.status(200).json({ comment: populatedComment });
-  } catch (error) {
-    console.error("Error adding comment:", error);
-    res.status(500).json(error.message || "Server Error");
-  }
-});
+//     return res.status(200).json({ comment: populatedComment });
+//   } catch (error) {
+//     console.error("Error adding comment:", error);
+//     res.status(500).json(error.message || "Server Error");
+//   }
+// });
 
 
 
@@ -557,34 +557,34 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
 
 
 
-// router.post("/comment/:postId", verifyToken, async (req, res) => {
-//   try {
-//     const CommentText = req.body.CommentText;
-//     const userId = req.user.UserId; // from decoded token
-//     const postId = req.params.postId;
+router.post("/comment/:postId", verifyToken, async (req, res) => {
+  try {
+    const CommentText = req.body.CommentText;
+    const userId = req.user.UserId; // from decoded token
+    const postId = req.params.postId;
 
-//     const post = await Post.findById(postId);
-//     if (!post) {
-//       return res.status(404).json("Post Not Found");
-//     }
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json("Post Not Found");
+    }
 
-//     const comment = {
-//       UserId: userId,
-//       CommentText,
-//       likes: 0,
-//       createdAt: new Date(),
-//     };
+    const comment = {
+      UserId: userId,
+      CommentText,
+      likes: 0,
+      createdAt: new Date(),
+    };
 
-//     post.comments.push(comment);
-//     await post.save({ validateModifiedOnly: true });
+    post.comments.push(comment);
+    await post.save({ validateModifiedOnly: true });
 
 
-//     res.status(200).json(post);
-//   } catch (error) {
-//     console.error("Error adding comment:", error);
-//     res.status(500).json(error.message || "Server Error");
-//   }
-// });
+    res.status(200).json(post);
+  } catch (error) {
+    console.error("Error adding comment:", error);
+    res.status(500).json(error.message || "Server Error");
+  }
+});
 
 
 // router.post("/comment/:postId", async (req, res) => {

@@ -6,6 +6,7 @@ const Post = require("./routers/Post");
 const User = require("./routers/User");
 const Content = require("./routers/content");
 const Search = require("./routers/autoai");
+const Demo = require("./routers/demo");
 const cors = require("cors") ;
 const path = require("path");
 
@@ -43,6 +44,7 @@ app.use("/user", User);
 app.use("/post", Post);
 app.use("/content", Content);
 app.use("/autoai", Search);
+app.use("/demo", Demo);
 
 
 // app.listen(4000, console.log("This Program run on 4000 Port"));

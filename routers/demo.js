@@ -7,6 +7,7 @@ const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const AWS = require("aws-sdk");
 const dotenv = require("dotenv");
 const fs = require("fs");
+const path = require("path");
 
 const verifyToken = require("../middleware/verifyToken");
 const Post = require("../models/Post");
@@ -14,7 +15,7 @@ const Post = require("../models/Post");
 dotenv.config();
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Configure AWS S3 for Cloudflare R2
+// Configure Cloudflare R2 via AWS SDK
 const r2 = new AWS.S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -24,8 +25,12 @@ const r2 = new AWS.S3({
 });
 
 const BUCKET_NAME = process.env.R2_BUCKET_NAME;
+const PUBLIC_BASE_URL = `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${BUCKET_NAME}`;
+
+// Multer memory upload
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Upload route
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   const { file } = req;
   const userId = req.user.UserId;
@@ -37,33 +42,36 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
   try {
     const timestamp = Date.now();
-    const fileKey = `${timestamp}-${file.originalname}`;
+    const ext = path.extname(file.originalname); // Get .mp4, .png, etc.
+    const safeFileKey = `${timestamp}${ext}`;
     const mediaType = file.mimetype;
 
-    // Upload original file to R2
+    // Upload media to R2
     await r2
       .upload({
         Bucket: BUCKET_NAME,
-        Key: fileKey,
+        Key: safeFileKey,
         Body: file.buffer,
         ContentType: mediaType,
       })
       .promise();
 
-    const mediaUrl = `https://${r2.endpoint.host}/${BUCKET_NAME}/${fileKey}`;
+    const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
     let thumbnailUrl = "";
 
+    // Generate video thumbnail
     if (mediaType.startsWith("video")) {
-      const tempPath = `/tmp/${timestamp}-${file.originalname}`;
-      fs.writeFileSync(tempPath, file.buffer);
+      const tempVideoPath = `/tmp/${timestamp}${ext}`;
+      const thumbFileName = `thumb-${timestamp}.png`;
+      const thumbPath = `/tmp/${thumbFileName}`;
 
-      const thumbPath = `/tmp/thumb-${timestamp}.png`;
+      fs.writeFileSync(tempVideoPath, file.buffer);
 
       await new Promise((resolve, reject) => {
-        ffmpeg(tempPath)
+        ffmpeg(tempVideoPath)
           .screenshots({
             timestamps: ["00:00:01.000"],
-            filename: `thumb-${timestamp}.png`,
+            filename: thumbFileName,
             folder: "/tmp",
             size: "320x240",
           })
@@ -71,26 +79,25 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
           .on("error", reject);
       });
 
-      const thumbnailBuffer = fs.readFileSync(thumbPath);
-      const thumbKey = `thumb-${timestamp}.png`;
+      const thumbBuffer = fs.readFileSync(thumbPath);
 
       await r2
         .upload({
           Bucket: BUCKET_NAME,
-          Key: thumbKey,
-          Body: thumbnailBuffer,
+          Key: thumbFileName,
+          Body: thumbBuffer,
           ContentType: "image/png",
         })
         .promise();
 
-      thumbnailUrl = `https://${r2.endpoint.host}/${BUCKET_NAME}/${thumbKey}`;
+      thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
     } else if (mediaType.startsWith("image")) {
       thumbnailUrl = mediaUrl;
     } else {
       return res.status(400).json({ error: "Unsupported file type." });
     }
 
-    // Save to MongoDB
+    // Save post to DB
     const newPost = new Post({
       userId,
       title,
@@ -114,7 +121,6 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       mediaUrl,
       thumbnailUrl,
     });
-
   } catch (err) {
     console.error("Upload Error:", err);
     res.status(500).json({ error: err.message });

@@ -424,6 +424,12 @@ router.get('/shorts', async (req, res) => {
       totalPages: Math.ceil(total / limit),
       videos,
     });
+    console.log(page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      videos)
+    
   } catch (error) {
     console.error('Error fetching shorts:', error);
     res.status(500).json({ message: 'Server error', error });

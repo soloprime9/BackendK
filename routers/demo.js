@@ -50,33 +50,35 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
     // If video, generate and upload thumbnail
     if (mediaType.startsWith("video")) {
-      const buffers = [];
+  const buffers = [];
 
-      await new Promise((resolve, reject) => {
-        ffmpeg(Readable.from(file.buffer))
-          .on("error", reject)
-          .on("end", resolve)
-          .screenshots({
-            count: 1,
-            size: "320x240",
-            filename: "thumbnail.png",
-          })
-          .outputFormat("image2pipe")
-          .pipe()
-          .on("data", (chunk) => buffers.push(chunk));
-      });
+  await new Promise((resolve, reject) => {
+    ffmpeg(Readable.from(file.buffer))
+      .on("error", reject)
+      .on("end", resolve)
+      .screenshots({
+        timestamps: ['00:00:01.000'], // <- Set fixed timemark
+        size: "320x240",
+        filename: "thumbnail.png"
+      })
+      .outputFormat("image2pipe")
+      .pipe()
+      .on("data", (chunk) => buffers.push(chunk));
+  });
 
-      const thumbnailBuffer = Buffer.concat(buffers);
-      const thumbKey = `thumb-${timestamp}.png`;
+  const thumbnailBuffer = Buffer.concat(buffers);
+  const thumbKey = `thumb-${timestamp}.png`;
 
-      const thumbUpload = await r2.upload({
-        Bucket: BUCKET_NAME,
-        Key: thumbKey,
-        Body: thumbnailBuffer,
-        ContentType: "image/png",
-      }).promise();
+  await r2.upload({
+    Bucket: BUCKET_NAME,
+    Key: thumbKey,
+    Body: thumbnailBuffer,
+    ContentType: "image/png",
+  }).promise();
 
-      thumbnailUrl = `https://${r2.endpoint.host}/${BUCKET_NAME}/${thumbKey}`;
+  thumbnailUrl = `https://${r2.endpoint.host}/${BUCKET_NAME}/${thumbKey}`;
+}
+
     } else if (mediaType.startsWith("image")) {
       thumbnailUrl = mediaUrl;
     } else {

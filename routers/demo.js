@@ -15,7 +15,7 @@ const Post = require("../models/Post");
 dotenv.config();
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Configure Cloudflare R2 via AWS SDK
+// ✅ Cloudflare R2 AWS SDK setup
 const r2 = new AWS.S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -24,13 +24,14 @@ const r2 = new AWS.S3({
   signatureVersion: "v4",
 });
 
+// ✅ Use public `.r2.dev` base domain for public access
 const BUCKET_NAME = process.env.R2_BUCKET_NAME;
-const PUBLIC_BASE_URL = `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${BUCKET_NAME}`;
+const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 
-// Multer memory upload
+// ✅ Multer (in-memory)
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Upload route
+// ✅ Upload Route
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   const { file } = req;
   const userId = req.user.UserId;
@@ -42,11 +43,11 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
   try {
     const timestamp = Date.now();
-    const ext = path.extname(file.originalname); // Get .mp4, .png, etc.
+    const ext = path.extname(file.originalname);
     const safeFileKey = `${timestamp}${ext}`;
     const mediaType = file.mimetype;
 
-    // Upload media to R2
+    // ✅ Upload original file to R2
     await r2
       .upload({
         Bucket: BUCKET_NAME,
@@ -59,7 +60,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
     let thumbnailUrl = "";
 
-    // Generate video thumbnail
+    // ✅ Generate video thumbnail
     if (mediaType.startsWith("video")) {
       const tempVideoPath = `/tmp/${timestamp}${ext}`;
       const thumbFileName = `thumb-${timestamp}.png`;
@@ -97,7 +98,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "Unsupported file type." });
     }
 
-    // Save post to DB
+    // ✅ Save post to MongoDB
     const newPost = new Post({
       userId,
       title,

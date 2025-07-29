@@ -140,7 +140,7 @@ const client = new Client()
 const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
-router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
+/*router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   let mediaUrl;
   let thumbnailUrl;
 
@@ -240,6 +240,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     res.status(500).json({ error: err.message || "Internal Server Error" });
   }
 });
+*/
 
 
 // // Cloudinary Configure

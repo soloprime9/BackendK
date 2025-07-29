@@ -113,6 +113,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       mediaUrl,
       thumbnailUrl,
     });
+
   } catch (err) {
     console.error("Upload Error:", err);
     res.status(500).json({ error: err.message });

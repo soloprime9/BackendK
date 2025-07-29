@@ -1,3 +1,11 @@
+
+
+
+
+
+
+
+
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -37,8 +45,8 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     const fileKey = `${timestamp}-${file.originalname}`;
     const mediaType = file.mimetype;
 
-    // Upload the media file to Cloudflare R2
-    const mediaUpload = await r2.upload({
+    // Upload media file to Cloudflare R2
+    await r2.upload({
       Bucket: BUCKET_NAME,
       Key: fileKey,
       Body: file.buffer,
@@ -48,7 +56,6 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     const mediaUrl = `https://${r2.endpoint.host}/${BUCKET_NAME}/${fileKey}`;
     let thumbnailUrl = "";
 
-    // If video, generate and upload thumbnail
     if (mediaType.startsWith("video")) {
       const buffers = [];
 
@@ -59,7 +66,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
           .screenshots({
             timestamps: ['00:00:01.000'],
             size: "320x240",
-            filename: "thumbnail.png"
+            filename: "thumbnail.png",
           })
           .outputFormat("image2pipe")
           .pipe()
@@ -83,7 +90,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "Unsupported file type." });
     }
 
-    // Save post in MongoDB
+    // Save to MongoDB
     const newPost = new Post({
       userId,
       title,

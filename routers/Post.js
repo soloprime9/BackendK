@@ -163,53 +163,50 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
     const endpoint = client.config.endpoint;
     const project = client.config.project;
-    mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedFile.$id}/view?project=${project}`;
+    mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedFile.$id}/view?projecD}/files/${uploadedFile.$id}/view?project=${project}`;
 
+
+    
     if (mediaType.startsWith("video")) {
-      // Generate thumbnail for video
-      const buffers = [];
-      await new Promise((resolve, reject) => {
-        ffmpeg()
-          .input(require('stream').Readable.from(file.buffer)) // Input directly from buffer
-          .on("end", () => {
-            console.log("Thumbnail generation finished");
-            resolve();
-          })
-          .on("error", (err) => {
-            console.error("Error generating thumbnail:", err);
-            reject(err);
-          })
-          .outputOptions([
-            "-vf", "thumbnail",
-            "-frames:v", "1",
-            "-s", "320x240" // Specify thumbnail size
-          ])
-          .outputFormat("image2pipe")
-          .pipe()
-          .on('data', (chunk) => buffers.push(chunk))
-          .on('end', () => {
-            // This is crucial: collect all data chunks into a single buffer
-            // and resolve the promise after all chunks have been received.
-            // The actual Appwrite upload will happen outside this promise.
-          })
-          .on('close', () => { // Use 'close' for when the pipe finishes
-            // This 'close' event handler is where you should resolve the promise
-            // and perform the Appwrite upload with the collected buffer.
-            // However, the Appwrite upload should happen AFTER the Promise resolves.
-          });
-      });
+  const buffers = [];
 
-      const thumbnailBuffer = Buffer.concat(buffers); // Concatenate all collected chunks
-      const uploadedThumb = await storage.createFile(
-        BUCKET_ID,
-        ID.unique(),
-        InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
-        [Permission.read(Role.any())]
-      );
-      thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
+  await new Promise((resolve, reject) => {
+    const stream = require('stream').Readable.from(file.buffer);
 
+    ffmpeg(stream)
+      .inputFormat('mp4') // optional: specify format if needed
+      .seekInput(1) // Seek to 1 second in video
+      .frames(1) // Capture only one frame
+      .outputOptions([
+        "-vf", "scale=320:240", // Resize thumbnail
+      ])
+      .outputFormat("image2") // Output as image
+      .on("error", (err) => {
+        console.error("Error generating thumbnail:", err);
+        reject(err);
+      })
+      .on("end", () => {
+        console.log("Thumbnail generation finished");
+        resolve();
+      })
+      .pipe()
+      .on("data", (chunk) => buffers.push(chunk));
+  });
+
+  const thumbnailBuffer = Buffer.concat(buffers);
+
+  const uploadedThumb = await storage.createFile(
+    BUCKET_ID,
+    ID.unique(),
+    InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
+    [Permission.read(Role.any())]
+  );
+  thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
+}
+
+      
     } else if (mediaType.startsWith("image")) {
-      // For images, the media URL is the thumbnail URL
+      // Fl URL
       thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedFile.$id}/preview?project=${project}`;
     } else {
       return res.status(400).json({ error: "Unsupported file type. Only videos and images are allowed." });

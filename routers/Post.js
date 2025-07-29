@@ -424,11 +424,13 @@ router.get('/shorts', async (req, res) => {
       totalPages: Math.ceil(total / limit),
       videos,
     });
-    console.log(page,
+    console.log({
+      page,
       limit,
       total,
       totalPages: Math.ceil(total / limit),
-      videos)
+      videos,
+    });
     
   } catch (error) {
     console.error('Error fetching shorts:', error);

@@ -374,6 +374,7 @@ router.get("/mango/getall", async (req, res) => {
       
   
        res.status(200).json(posts);
+      console.log(posts)
       
     } catch (error) {
       return res.status(500).json({ message: "Error fetching posts", error: error.message });

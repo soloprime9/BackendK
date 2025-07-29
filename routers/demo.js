@@ -5,7 +5,6 @@ const multer = require("multer");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const AWS = require("aws-sdk");
-const { Readable } = require("stream");
 const dotenv = require("dotenv");
 const fs = require("fs");
 
@@ -32,14 +31,16 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   const userId = req.user.UserId;
   const { title, tags } = req.body;
 
-  if (!file) return res.status(400).json({ error: "No file uploaded" });
+  if (!file) {
+    return res.status(400).json({ error: "No file uploaded" });
+  }
 
   try {
     const timestamp = Date.now();
     const fileKey = `${timestamp}-${file.originalname}`;
     const mediaType = file.mimetype;
 
-    // Upload original media to R2
+    // Upload original file to R2
     await r2
       .upload({
         Bucket: BUCKET_NAME,

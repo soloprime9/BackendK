@@ -14,9 +14,9 @@ router.get("/mango/getall", async (req, res) => {
     try{
     const Users = await User.find();
    
-    // res.status(200).json(Users);
+     res.status(200).json(Users);
     
-  //  console.log("UserId:", req.user.UserId, "Users: ", Users.length );
+    console.log("UserId:", req.user.UserId, "Users: ", Users.length );
 
         console.log(Users);
     }

@@ -9,7 +9,7 @@ const Post = require("../models/Post");
 dotenv.config();
 
 
-router.get("/mango/getall", verifyToken, async (req, res) => {
+router.get("/mango/getall", async (req, res) => {
     
     try{
     const Users = await User.find();

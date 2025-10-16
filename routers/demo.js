@@ -34,7 +34,7 @@ const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 const upload = multer({ storage: multer.memoryStorage() });
 
 
-app.get("/check", verifyToken, (req, res) => {
+router.get("/check", verifyToken, (req, res) => {
   res.json({ message: "Access granted!", user: req.user });
 });
 
@@ -160,5 +160,6 @@ process.on("uncaughtException", (error) => {
 });
 
 module.exports = router;
+
 
 

@@ -16,6 +16,6 @@ const verifyToken = (req, res, next)=> {
        return res.status(500).json("Error in Token Checking");
     }
 
-}
+} 
 
 module.exports =verifyToken;

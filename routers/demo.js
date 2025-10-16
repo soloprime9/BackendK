@@ -30,6 +30,7 @@ const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 // ✅ Multer (in-memory storage)
 const upload = multer({ storage: multer.memoryStorage() });
 
+console.log("now uploading starts");
 // ✅ Upload route (with thumbnail for video)
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   const { file } = req;
@@ -123,6 +124,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 
 module.exports = router;
            
+
 
 
 

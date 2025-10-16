@@ -21,7 +21,7 @@ app.use(express.json());
 app.use(cors());
 
 app.use(cors({
-  origin: ['https://computer-xrfg.vercel.app', 'https://www.fondpeace.com', 'http://localhost:3000', "http://localhost:8081", "https://backendk-z915.onrender.com/", "https://backend-k.vercel.app/"]
+  origin: ['https://computer-xrfg.vercel.app', 'https://www.fondpeace.com', 'http://localhost:3000', "http://localhost:8081"]
 }));
 
 

@@ -33,8 +33,13 @@ const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 // ✅ Multer (in-memory)
 const upload = multer({ storage: multer.memoryStorage() });
 
+
+app.get("/check", verifyToken, (req, res) => {
+  res.json({ message: "Access granted!", user: req.user });
+});
+
 // ✅ UPLOAD ROUTE WITH DEBUGGING
-router.post("/upload",  upload.single("file"), async (req, res) => {
+router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   const { file } = req;
   const userId = req.user.UserId;
   const { title, tags } = req.body;
@@ -155,4 +160,5 @@ process.on("uncaughtException", (error) => {
 });
 
 module.exports = router;
+
 

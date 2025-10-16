@@ -1,4 +1,4 @@
-"{
+{
   "name": "express",
   "version": "1.0.0",
   "description": "",
@@ -35,8 +35,7 @@
     "uuid": "^11.0.3",
     "vercel": "^28.18.5",
     "multer": "^2.0.1",
-    "@google/genai": "^0.8.0"," fix it bro for above 💯 code 
-    "@
-google/generative-ai": "^0.24.0"
+    "@google/genai": "^0.8.0",
+    "@google/generative-ai": "^0.24.0"
   }
 }

@@ -39,7 +39,7 @@ router.get("/check", (req, res) => {
 });
 
 // ✅ UPLOAD ROUTE WITH DEBUGGING
-router.post("/upload", upload.single("file"), async (req, res) => {
+router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
   const { file } = req;
   const userId = req.user.UserId;
   const { title, tags } = req.body;
@@ -160,6 +160,7 @@ process.on("uncaughtException", (error) => {
 });
 
 module.exports = router;
+
 
 
 

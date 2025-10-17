@@ -43,7 +43,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
   const { file } = req;
   const userId = req.user.UserId;
   const { title, tags } = req.body;
-res.json({ message: "Access granted!", user: req.user });
+
   if (!file) {
     errLog("No file uploaded!");
     return res.status(400).json({ error: "No file uploaded" });
@@ -160,6 +160,7 @@ process.on("uncaughtException", (error) => {
 });
 
 module.exports = router;
+
 
 
 

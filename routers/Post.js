@@ -736,22 +736,54 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 
 
 
-router.get("/single/:id", async(req, res) =>{
-    
-   try{
-    const{ id } = req.params;
-    const celect = await Post.findById(id).populate('userId', 'username');    
-    if(!celect){
-        return res.status(400).json("Post not found");
+router.get("/single/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    // ✅ Step 1: Get main post
+    const selectedPost = await Post.findById(id).populate("userId", "username");
+    if (!selectedPost) {
+      return res.status(404).json({ message: "Post not found" });
     }
-    res.status(200).json(celect)
 
-   }
-   catch(error){
-    console.log(error)
-   }
+    const { tags, title, mediaType } = selectedPost;
 
-})
+    // ✅ Step 2: Prepare regex from title (for keyword search)
+    const titleKeywords = title
+      ? title.split(" ").filter((word) => word.length > 2) // ignore short words
+      : [];
+
+    const titleRegex = titleKeywords.length
+      ? { $or: titleKeywords.map((word) => ({ title: { $regex: word, $options: "i" } })) }
+      : {};
+
+    // ✅ Step 3: Build related posts query (match by tags, title, or similar media)
+    const query = {
+      _id: { $ne: id }, // exclude current post
+      $or: [
+        { tags: { $in: tags } },
+        { mediaType: mediaType }, // similar media type (images/videos)
+        ... (titleRegex.$or || []),
+      ],
+    };
+
+    // ✅ Step 4: Fetch related posts (prefer videos, latest first)
+    const relatedPosts = await Post.find(query)
+      .populate("userId", "username")
+      .sort({ mediaType: -1, createdAt: -1 }) // videos first, then latest
+      .limit(10);
+
+    // ✅ Step 5: Respond with full data
+    res.status(200).json({
+      post: selectedPost,
+      related: relatedPosts,
+    });
+
+  } catch (error) {
+    console.error("Error fetching single post & related:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
+  }
+});
+
 
 module.exports = router;

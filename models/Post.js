@@ -30,6 +30,7 @@ const PostSchema = new Schema({
     }, { _id: false })
   },
   mediaType: { type: String, required: true },
+  duration: {type: String},
   likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
   comments: [CommentSchema],
 }, { timestamps: true });

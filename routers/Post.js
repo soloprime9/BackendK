@@ -746,6 +746,9 @@ router.get("/single/:id", async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
+    // ⭐ Increase views (non-blocking, safe for SEO)
+    Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+
     const { tags, title, mediaType } = selectedPost;
 
     // ✅ Step 2: Prepare regex from title (for keyword search)

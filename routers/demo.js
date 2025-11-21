@@ -30,6 +30,32 @@ const r2Client = new S3Client({
 const BUCKET_NAME = process.env.R2_BUCKET_NAME;
 const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 
+
+// 🎬 Convert video duration → ISO 8601 format (Google-friendly)
+function getVideoDurationISO(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+
+      const totalSeconds = Math.floor(metadata.format.duration);
+
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      const iso =
+        "PT" +
+        (hours > 0 ? `${hours}H` : "") +
+        (minutes > 0 ? `${minutes}M` : "") +
+        (seconds > 0 ? `${seconds}S` : "");
+
+      resolve(iso);
+    });
+  });
+}
+
+
+
 // ✅ Multer (in-memory)
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -72,6 +98,8 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
 
     const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
     let thumbnailUrl = "";
+    let durationISO = null; // ⭐ will store video duration
+
 
     // ✅ Step 2: Generate Thumbnail for Video
     if (mediaType.startsWith("video")) {
@@ -112,6 +140,11 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
       );
       log("✅ Thumbnail uploaded to R2:", thumbFileName);
       thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
+      
+      durationISO = await getVideoDurationISO(tempVideoPath);
+      log("🎬 ISO Duration:", durationISO);
+
+      
     } else if (mediaType.startsWith("image")) {
       log("Image upload detected — no thumbnail generation needed.");
       thumbnailUrl = mediaUrl;
@@ -129,6 +162,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
       media: mediaUrl,
       thumbnail: thumbnailUrl,
       mediaType,
+      duration: durationISO,
       likes: [],
       comments: [],
     });
@@ -141,6 +175,7 @@ router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
       post: savedPost,
       mediaUrl,
       thumbnailUrl,
+      duration: durationISO,
     });
 
     log("✅ Upload completed successfully for:", file.originalname);
@@ -160,6 +195,7 @@ process.on("uncaughtException", (error) => {
 });
 
 module.exports = router;
+
 
 
 

@@ -91,37 +91,49 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       const thumbPath = `/tmp/${thumbFileName}`;
       fs.writeFileSync(tempVideoPath, file.buffer);
 
-      // Generate thumbnail at 1s (fallback to 0 if short video)
-      await new Promise((resolve, reject) => {
-        ffmpeg(tempVideoPath)
-          .screenshots({
-            timestamps: ["00:00:01.000", "00:00:00.000"],
-            filename: thumbFileName,
-            folder: "/tmp",
-            size: "320x240",
-          })
-          .on("end", resolve)
-          .on("error", reject);
-      });
+      try {
+        // Generate high-quality thumbnail safely
+        await new Promise((resolve) => {
+          ffmpeg(tempVideoPath)
+            .screenshots({
+              timestamps: ["00:00:01.000", "00:00:00.000"], // fallback
+              filename: thumbFileName,
+              folder: "/tmp",
+              size: "1280x720", // HD 16:9
+            })
+            .on("end", resolve)
+            .on("error", (err) => {
+              errLog("⚠️ Thumbnail generation failed:", err);
+              resolve(); // continue anyway
+            });
+        });
 
-      // Upload thumbnail
-      const thumbBuffer = fs.readFileSync(thumbPath);
-      await r2Client.send(
-        new PutObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: thumbFileName,
-          Body: thumbBuffer,
-          ContentType: "image/png",
-        })
-      );
-      thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
+        // Upload thumbnail if exists
+        if (fs.existsSync(thumbPath)) {
+          const thumbBuffer = fs.readFileSync(thumbPath);
+          await r2Client.send(
+            new PutObjectCommand({
+              Bucket: BUCKET_NAME,
+              Key: thumbFileName,
+              Body: thumbBuffer,
+              ContentType: "image/png",
+            })
+          );
+          thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
+          fs.unlinkSync(thumbPath); // cleanup
+        } else {
+          log("⚠️ Thumbnail missing, using video URL as fallback");
+        }
 
-      // Get duration in seconds
-      durationSeconds = await getVideoDurationInSeconds(tempVideoPath);
-
-      // Cleanup temp files
-      fs.unlinkSync(tempVideoPath);
-      fs.unlinkSync(thumbPath);
+        // Duration
+        durationSeconds = await getVideoDurationInSeconds(tempVideoPath);
+      } catch (err) {
+        errLog("❌ Video processing error:", err);
+        thumbnailUrl = mediaUrl;
+        durationSeconds = 0;
+      } finally {
+        if (fs.existsSync(tempVideoPath)) fs.unlinkSync(tempVideoPath); // cleanup temp video
+      }
     }
 
     // Step 3: Save post in MongoDB
@@ -145,12 +157,12 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       mediaUrl,
       thumbnailUrl,
       duration: durationSeconds,
-      durationISO: secondsToISO(durationSeconds), // for frontend JSON-LD
+      durationISO: secondsToISO(durationSeconds), // frontend/Google-ready
     });
 
     log("✅ Upload completed successfully for:", file.originalname);
   } catch (error) {
-    errLog("Upload failed:", error);
+    errLog("❌ Upload failed:", error);
     res.status(500).json({ error: error.message || "Upload failed" });
   }
 });
@@ -159,7 +171,6 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
 
 module.exports = router;
-
 
 
 
@@ -366,6 +377,7 @@ module.exports = router;
 // });
 
 // module.exports = router;
+
 
 
 

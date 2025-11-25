@@ -386,28 +386,23 @@ router.get("/mango/getall", async (req, res) => {
 
 router.get("/single/search", async (req, res) => {
   try {
-    const query = req.query.q || "";
+    const q = req.query.q?.trim();
+    if (!q) return res.json([]);
 
-    if (!query.trim()) {
-      return res.status(200).json([]);
-    }
-
-    const posts = await Post.find(
-      {
-        $or: [
-          { title: { $regex: query, $options: "i" } }, // title match
-          { hashtags: { $regex: query, $options: "i" } }, // hashtag match
-        ],
-      }
-    )
+    const posts = await Post.find({
+      $or: [
+        { title: { $regex: q, $options: "i" } },
+        { hashtags: { $regex: q, $options: "i" } },
+      ],
+    })
+      .select("title thumbnail media mediaType likes comments views userId")
+      .populate("userId", "username profilePic")
       .sort({ createdAt: -1 })
-      .limit(30)
-      .populate("userId", "username profilePic");
+      .limit(30);
 
-    res.status(200).json(posts);
-
-  } catch (error) {
-    res.status(500).json({ message: "Search error", error: error.message });
+    res.json(posts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

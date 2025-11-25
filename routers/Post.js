@@ -364,22 +364,24 @@ const BUCKET_ID = "685fc9880036ec074baf";
 
 
 router.get("/mango/getall", async (req, res) => {
-    try {
-      const posts = await Post.find()
-      .sort({ createdAt: -1 }) 
+  try {
+    const posts = await Post.find()
+      .sort({ createdAt: -1 })       // Newest first
+      .limit(20)                     // Only latest 20 posts
       .populate("userId", "username profilePic")
       .populate("comments.userId", "username profilePic")
       .populate("comments.replies.userId", "username profilePic");
-      
-      
-  
-       res.status(200).json(posts);
-      console.log(posts)
-      
-    } catch (error) {
-      return res.status(500).json({ message: "Error fetching posts", error: error.message });
-    }
-  });
+
+    res.status(200).json(posts);
+
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error fetching posts",
+      error: error.message,
+    });
+  }
+});
+
   
 router.delete("/delete/:postId", async (req, res) => {
     try{

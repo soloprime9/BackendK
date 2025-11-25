@@ -382,7 +382,37 @@ router.get("/mango/getall", async (req, res) => {
   }
 });
 
-  
+
+
+router.get("/single/search", async (req, res) => {
+  try {
+    const query = req.query.q || "";
+
+    if (!query.trim()) {
+      return res.status(200).json([]);
+    }
+
+    const posts = await Post.find(
+      {
+        $or: [
+          { title: { $regex: query, $options: "i" } }, // title match
+          { hashtags: { $regex: query, $options: "i" } }, // hashtag match
+        ],
+      }
+    )
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .populate("userId", "username profilePic");
+
+    res.status(200).json(posts);
+
+  } catch (error) {
+    res.status(500).json({ message: "Search error", error: error.message });
+  }
+});
+
+
+
 router.delete("/delete/:postId", async (req, res) => {
     try{
     const postId = req.params.postId;

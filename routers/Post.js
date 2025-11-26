@@ -433,16 +433,18 @@ router.get('/shorts', async (req, res) => {
   const skip = (page - 1) * limit;
 
   try {
-    const total = await Post.countDocuments({ media: { $regex: /\.mp4$/i } });
+    const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
 
-    const videos = await Post.find({ mediaType: { $regex: /^video\// } })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate('userId', 'username')
-        .populate('comments', 'userId')
-        .populate('likes', 'userId');
+    const query = { media: { $regex: videoExtensions } };
+    const total = await Post.countDocuments(query);
 
+    const videos = await Post.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('userId', 'username')
+      .populate('comments', 'userId')
+      .populate('likes', 'userId');
 
     res.status(200).json({
       page,
@@ -451,14 +453,7 @@ router.get('/shorts', async (req, res) => {
       totalPages: Math.ceil(total / limit),
       videos,
     });
-    console.log({
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-      videos,
-    });
-    
+
   } catch (error) {
     console.error('Error fetching shorts:', error);
     res.status(500).json({ message: 'Server error', error });

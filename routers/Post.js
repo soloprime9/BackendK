@@ -769,16 +769,16 @@ router.get("/single/:id", async (req, res) => {
 
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    const { tags, title, mediaType } = selectedPost;
+    const { tags = [], title = "", mediaType } = selectedPost;
 
-    const titleKeywords = title
-      ? title.split(" ").filter((word) => word.length > 2)
-      : [];
-
-    // 🔥 Regex Escape Function
+    // Escape regex
     function escapeRegex(str) {
       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
+
+    const titleKeywords = title
+      ? title.split(" ").filter((w) => w.length > 2)
+      : [];
 
     const titleRegex = titleKeywords.length
       ? {
@@ -788,23 +788,48 @@ router.get("/single/:id", async (req, res) => {
         }
       : {};
 
-    const query = {
-      _id: { $ne: id },
+    // 1️⃣ First: Get TOP 2 latest videos
+    let topLatest = await Post.find({
+      _id: { $ne: id }
+    })
+      .populate("userId", "username")
+      .sort({ createdAt: -1 })
+      .limit(2);
+
+
+    // 2️⃣ Then: get related posts
+    const relatedQuery = {
+      _id: { $ne: id, $nin: topLatest.map((v) => v._id) },
       $or: [
-        { tags: { $in: tags } },
-        { mediaType: mediaType },
+        ...(tags.length ? [{ tags: { $in: tags } }] : []),
+        ...(mediaType ? [{ mediaType }] : []),
         ...(titleRegex.$or || []),
       ],
     };
 
-    const relatedPosts = await Post.find(query)
+    let related = await Post.find(relatedQuery)
       .populate("userId", "username")
-      .sort({ mediaType: -1, createdAt: -1 })
-      .limit(10);
+      .sort({ createdAt: -1 })
+      .limit(8); // total should become 10
+
+    // 3️⃣ Fill remaining with latest
+    if (related.length < 8) {
+      const extra = await Post.find({
+        _id: {
+          $ne: id,
+          $nin: [...topLatest.map((v) => v._id), ...related.map((v) => v._id)],
+        },
+      })
+        .populate("userId", "username")
+        .sort({ createdAt: -1 })
+        .limit(8 - related.length);
+
+      related = [...related, ...extra];
+    }
 
     res.status(200).json({
       post: selectedPost,
-      related: relatedPosts,
+      related: [...topLatest, ...related], // 🔥 latest videos on TOP
     });
 
   } catch (error) {
@@ -812,6 +837,7 @@ router.get("/single/:id", async (req, res) => {
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
+
 
 
 

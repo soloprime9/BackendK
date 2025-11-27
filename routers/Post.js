@@ -769,7 +769,7 @@ router.get("/single/:id", async (req, res) => {
 
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    const { tags = [], title = "", mediaType } = selectedPost;
+    const { tags = [], title = "" } = selectedPost;
 
     // Escape regex
     function escapeRegex(str) {
@@ -788,21 +788,21 @@ router.get("/single/:id", async (req, res) => {
         }
       : {};
 
-    // 1️⃣ First: Get TOP 2 latest videos
+    // 1️⃣ TOP 2 latest videos only
     let topLatest = await Post.find({
-      _id: { $ne: id }
+      _id: { $ne: id },
+      mediaType: "video",  // 🔥 only videos
     })
       .populate("userId", "username")
       .sort({ createdAt: -1 })
       .limit(2);
 
-
-    // 2️⃣ Then: get related posts
+    // 2️⃣ Related posts — only videos
     const relatedQuery = {
       _id: { $ne: id, $nin: topLatest.map((v) => v._id) },
+      mediaType: "video", // 🔥 only videos
       $or: [
         ...(tags.length ? [{ tags: { $in: tags } }] : []),
-        ...(mediaType ? [{ mediaType }] : []),
         ...(titleRegex.$or || []),
       ],
     };
@@ -810,15 +810,16 @@ router.get("/single/:id", async (req, res) => {
     let related = await Post.find(relatedQuery)
       .populate("userId", "username")
       .sort({ createdAt: -1 })
-      .limit(8); // total should become 10
+      .limit(8);
 
-    // 3️⃣ Fill remaining with latest
+    // 3️⃣ Fill remaining with latest videos only
     if (related.length < 8) {
       const extra = await Post.find({
         _id: {
           $ne: id,
           $nin: [...topLatest.map((v) => v._id), ...related.map((v) => v._id)],
         },
+        mediaType: "video", // 🔥 only videos
       })
         .populate("userId", "username")
         .sort({ createdAt: -1 })
@@ -829,7 +830,7 @@ router.get("/single/:id", async (req, res) => {
 
     res.status(200).json({
       post: selectedPost,
-      related: [...topLatest, ...related], // 🔥 latest videos on TOP
+      related: [...topLatest, ...related], // 🔥 latest videos first
     });
 
   } catch (error) {
@@ -837,6 +838,7 @@ router.get("/single/:id", async (req, res) => {
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
+
 
 
 

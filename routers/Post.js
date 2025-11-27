@@ -3,7 +3,7 @@
 // const multer = require("multer");
 // const fs = require("fs");
 // const path = require("path");
- 
+  
 // const ffmpeg = require("fluent-ffmpeg");
 // const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 // ffmpeg.setFfmpegPath(ffmpegPath);
@@ -757,7 +757,6 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 });
 
 
-
 router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -767,11 +766,11 @@ router.get("/single/:id", async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
+    // Increase view count
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
     const { tags = [], title = "" } = selectedPost;
 
-    // Escape regex
     function escapeRegex(str) {
       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
@@ -788,38 +787,55 @@ router.get("/single/:id", async (req, res) => {
         }
       : {};
 
-    // 1️⃣ TOP 2 latest videos only
+    /* ----------------------------------------------
+       🔥 VALID VIDEO EXTENSIONS
+       ---------------------------------------------- */
+    const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|3gp|mpeg|mpg)$/i;
+
+    const isVideoQuery = {
+      $or: [
+        { mediaType: /video/i },        // video mime
+        { mediaUrl: videoExtensions },  // match extension
+        { media: videoExtensions }      // match extension
+      ]
+    };
+
+    /* ----------------------------------------------
+       1️⃣ Top 2 latest videos
+       ---------------------------------------------- */
     let topLatest = await Post.find({
       _id: { $ne: id },
-      mediaType: "video",  // 🔥 only videos
+      ...isVideoQuery,
     })
       .populate("userId", "username")
       .sort({ createdAt: -1 })
       .limit(2);
 
-    // 2️⃣ Related posts — only videos
-    const relatedQuery = {
+    /* ----------------------------------------------
+       2️⃣ Related videos only
+       ---------------------------------------------- */
+    let related = await Post.find({
       _id: { $ne: id, $nin: topLatest.map((v) => v._id) },
-      mediaType: "video", // 🔥 only videos
+      ...isVideoQuery,
       $or: [
         ...(tags.length ? [{ tags: { $in: tags } }] : []),
         ...(titleRegex.$or || []),
       ],
-    };
-
-    let related = await Post.find(relatedQuery)
+    })
       .populate("userId", "username")
       .sort({ createdAt: -1 })
       .limit(8);
 
-    // 3️⃣ Fill remaining with latest videos only
+    /* ----------------------------------------------
+       3️⃣ If less than 8, fill with latest videos
+       ---------------------------------------------- */
     if (related.length < 8) {
       const extra = await Post.find({
         _id: {
           $ne: id,
           $nin: [...topLatest.map((v) => v._id), ...related.map((v) => v._id)],
         },
-        mediaType: "video", // 🔥 only videos
+        ...isVideoQuery,
       })
         .populate("userId", "username")
         .sort({ createdAt: -1 })
@@ -830,11 +846,11 @@ router.get("/single/:id", async (req, res) => {
 
     res.status(200).json({
       post: selectedPost,
-      related: [...topLatest, ...related], // 🔥 latest videos first
+      related: [...topLatest, ...related],
     });
 
   } catch (error) {
-    console.error("Error fetching single post & related:", error);
+    console.error("Error:", error);
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });

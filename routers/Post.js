@@ -762,43 +762,46 @@ router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // ✅ Step 1: Get main post
     const selectedPost = await Post.findById(id).populate("userId", "username");
     if (!selectedPost) {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    // ⭐ Increase views (non-blocking, safe for SEO)
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
     const { tags, title, mediaType } = selectedPost;
 
-    // ✅ Step 2: Prepare regex from title (for keyword search)
     const titleKeywords = title
-      ? title.split(" ").filter((word) => word.length > 2) // ignore short words
+      ? title.split(" ").filter((word) => word.length > 2)
       : [];
 
+    // 🔥 Regex Escape Function
+    function escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
     const titleRegex = titleKeywords.length
-      ? { $or: titleKeywords.map((word) => ({ title: { $regex: word, $options: "i" } })) }
+      ? {
+          $or: titleKeywords.map((word) => ({
+            title: { $regex: escapeRegex(word), $options: "i" },
+          })),
+        }
       : {};
 
-    // ✅ Step 3: Build related posts query (match by tags, title, or similar media)
     const query = {
-      _id: { $ne: id }, // exclude current post
+      _id: { $ne: id },
       $or: [
         { tags: { $in: tags } },
-        { mediaType: mediaType }, // similar media type (images/videos)
-        ... (titleRegex.$or || []),
+        { mediaType: mediaType },
+        ...(titleRegex.$or || []),
       ],
     };
 
-    // ✅ Step 4: Fetch related posts (prefer videos, latest first)
     const relatedPosts = await Post.find(query)
       .populate("userId", "username")
-      .sort({ mediaType: -1, createdAt: -1 }) // videos first, then latest
+      .sort({ mediaType: -1, createdAt: -1 })
       .limit(10);
 
-    // ✅ Step 5: Respond with full data
     res.status(200).json({
       post: selectedPost,
       related: relatedPosts,
@@ -809,6 +812,7 @@ router.get("/single/:id", async (req, res) => {
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
+
 
 
 module.exports = router;

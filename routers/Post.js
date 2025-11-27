@@ -759,7 +759,6 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 
 
 
-
 router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -769,18 +768,18 @@ router.get("/single/:id", async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    // Increase view count
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    const { tags = [], title = "" } = selectedPost;
+    const { tags, title, mediaType } = selectedPost;
 
+    const titleKeywords = title
+      ? title.split(" ").filter((word) => word.length > 2)
+      : [];
+
+    // 🔥 Regex Escape Function
     function escapeRegex(str) {
       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
-
-    const titleKeywords = title
-      ? title.split(" ").filter((w) => w.length > 2)
-      : [];
 
     const titleRegex = titleKeywords.length
       ? {
@@ -790,56 +789,27 @@ router.get("/single/:id", async (req, res) => {
         }
       : {};
 
-    /* ----------------------------------------------
-       🔥 VIDEO FILTER ONLY
-    ---------------------------------------------- */
-    const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|3gp|mpeg|mpg)$/i;
-
-    const videoFilter = {
+    const query = {
+      _id: { $ne: id },
       $or: [
-        { mediaType: /video/i },
-        { mediaUrl: videoExtensions },
-        { media: videoExtensions }
-      ]
+        { tags: { $in: tags } },
+        { mediaType: mediaType },
+        ...(titleRegex.$or || []),
+      ],
     };
 
-    /* ----------------------------------------------
-       🔥 Related posts: only videos, max 10
-    ---------------------------------------------- */
-    let related = await Post.find({
-      _id: { $ne: id },
-      ...videoFilter,
-      $or: [
-        ...(tags.length ? [{ tags: { $in: tags } }] : []),
-        ...(titleRegex.$or || [])
-      ]
-    })
-    .populate("userId", "username")
-    .sort({ createdAt: -1 })
-    .limit(10);
-
-    /* ----------------------------------------------
-       🔥 Fill remaining with latest videos only if < 10
-    ---------------------------------------------- */
-    if (related.length < 10) {
-      const extra = await Post.find({
-        _id: { $ne: id, $nin: related.map((v) => v._id) },
-        ...videoFilter
-      })
+    const relatedPosts = await Post.find(query)
       .populate("userId", "username")
-      .sort({ createdAt: -1 })
-      .limit(10 - related.length);
-
-      related = [...related, ...extra];
-    }
+      .sort({ mediaType: -1, createdAt: -1 })
+      .limit(10);
 
     res.status(200).json({
       post: selectedPost,
-      related
+      related: relatedPosts,
     });
 
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Error fetching single post & related:", error);
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });

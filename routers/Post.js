@@ -757,6 +757,9 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 });
 
 
+
+
+
 router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -788,65 +791,51 @@ router.get("/single/:id", async (req, res) => {
       : {};
 
     /* ----------------------------------------------
-       🔥 VALID VIDEO EXTENSIONS
-       ---------------------------------------------- */
+       🔥 VIDEO FILTER ONLY
+    ---------------------------------------------- */
     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|3gp|mpeg|mpg)$/i;
 
-    const isVideoQuery = {
+    const videoFilter = {
       $or: [
-        { mediaType: /video/i },        // video mime
-        { mediaUrl: videoExtensions },  // match extension
-        { media: videoExtensions }      // match extension
+        { mediaType: /video/i },
+        { mediaUrl: videoExtensions },
+        { media: videoExtensions }
       ]
     };
 
     /* ----------------------------------------------
-       1️⃣ Top 2 latest videos
-       ---------------------------------------------- */
-    let topLatest = await Post.find({
-      _id: { $ne: id },
-      ...isVideoQuery,
-    })
-      .populate("userId", "username")
-      .sort({ createdAt: -1 })
-      .limit(2);
-
-    /* ----------------------------------------------
-       2️⃣ Related videos only
-       ---------------------------------------------- */
+       🔥 Related posts: only videos, max 10
+    ---------------------------------------------- */
     let related = await Post.find({
-      _id: { $ne: id, $nin: topLatest.map((v) => v._id) },
-      ...isVideoQuery,
+      _id: { $ne: id },
+      ...videoFilter,
       $or: [
         ...(tags.length ? [{ tags: { $in: tags } }] : []),
-        ...(titleRegex.$or || []),
-      ],
+        ...(titleRegex.$or || [])
+      ]
     })
-      .populate("userId", "username")
-      .sort({ createdAt: -1 })
-      .limit(8);
+    .populate("userId", "username")
+    .sort({ createdAt: -1 })
+    .limit(10);
 
     /* ----------------------------------------------
-       3️⃣ If less than 8, fill with latest videos
-       ---------------------------------------------- */
-    if (related.length < 8) {
+       🔥 Fill remaining with latest videos only if < 10
+    ---------------------------------------------- */
+    if (related.length < 10) {
       const extra = await Post.find({
-        _id: {
-          $ne: id,
-          $nin: [...topLatest.map((v) => v._id), ...related.map((v) => v._id)],
-        },
-        ...isVideoQuery,
+        _id: { $ne: id, $nin: related.map((v) => v._id) },
+        ...videoFilter
       })
-        .populate("userId", "username")
-        .sort({ createdAt: -1 })
-        .limit(8 - related.length);
+      .populate("userId", "username")
+      .sort({ createdAt: -1 })
+      .limit(10 - related.length);
 
       related = [...related, ...extra];
     }
 
     res.status(200).json({
       post: selectedPost,
-      related: [...topLatest, ...related],
+      related
     });
 
   } catch (error) {

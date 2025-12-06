@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const BookmarkSchema = new Schema({
     user: { type: Schema.Types.ObjectId, ref: "User" },
@@ -7,3 +7,4 @@ const BookmarkSchema = new Schema({
 });
 
 module.exports = model("Bookmark", BookmarkSchema);
+

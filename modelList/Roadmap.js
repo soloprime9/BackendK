@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const RoadmapSchema = new Schema({
     product: { type: Schema.Types.ObjectId, ref: "Product" },
@@ -12,3 +12,4 @@ const RoadmapSchema = new Schema({
 });
 
 module.exports = model("Roadmap", RoadmapSchema);
+

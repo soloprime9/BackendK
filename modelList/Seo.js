@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const SeoSchema = new Schema({
     metaTitle: String,
@@ -13,3 +13,4 @@ const SeoSchema = new Schema({
 });
 
 module.exports = model("Seo", SeoSchema);
+

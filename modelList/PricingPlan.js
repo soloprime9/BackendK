@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const PricingPlanSchema = new Schema({
     product: { type: Schema.Types.ObjectId, ref: "Product", required: true }, // attach to product
@@ -29,3 +29,4 @@ const PricingPlanSchema = new Schema({
 }, { timestamps: true });
 
 module.exports = model("PricingPlan", PricingPlanSchema);
+

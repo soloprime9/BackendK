@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const SubscriberSchema = new Schema({
     email: { type: String, unique: true },
@@ -6,3 +6,4 @@ const SubscriberSchema = new Schema({
 });
 
 module.exports = model("Subscriber", SubscriberSchema);
+

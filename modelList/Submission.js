@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const SubmissionSchema = new Schema(
   {
@@ -45,3 +45,4 @@ const SubmissionSchema = new Schema(
 );
 
 module.exports = model("Submission", SubmissionSchema);
+

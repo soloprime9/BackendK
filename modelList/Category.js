@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const CategorySchema = new Schema({
     name: { type: String, required: true },
@@ -9,3 +9,4 @@ const CategorySchema = new Schema({
 });
 
 module.exports = model("Category", CategorySchema);
+

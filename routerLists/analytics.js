@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
 
-const Analytics = require("../models/Analytics");
-const Product = require("../models/Product");
-const { verifyToken, isAdmin } = require("../middlewares/VerifyToken");
+const Analytics = require("../modelList/Analytics");
+const Product = require("../modelList/Product");
+const { verifyToken, isAdmin } = require("../middleware/VerifyListToken");
 
 // -----------------------------------------
 // ⭐ GET ANALYTICS FOR A PRODUCT
@@ -82,3 +82,4 @@ router.delete("/reset/:productId", verifyToken, isAdmin, async (req, res) => {
 });
 
 module.exports = router;
+

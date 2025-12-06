@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const FeatureRequestSchema = new Schema({
     product: { type: Schema.Types.ObjectId, ref: "Product" },
@@ -13,3 +13,4 @@ const FeatureRequestSchema = new Schema({
 });
 
 module.exports = model("FeatureRequest", FeatureRequestSchema);
+

@@ -7,14 +7,14 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-const Product = require("../models/Product");
-const Category = require("../models/Category");
-const Tag = require("../models/Tag");
-const PricingPlan = require("../models/PricingPlan");
-const Seo = require("../models/Seo");
-const Location = require("../models/Location");
-const User = require("../models/User");
-const { verifyToken } = require("../middlewares/VerifyToken");
+const Product = require("../modelList/Product");
+const Category = require("../modelList/Category");
+const Tag = require("../modelList/Tag");
+const PricingPlan = require("../modelList/PricingPlan");
+const Seo = require("../modelList/Seo");
+const Location = require("../modelList/Location");
+const User = require("../modelList/User");
+const { verifyToken } = require("../middleware/VerifyListToken");
 
 dotenv.config();
 
@@ -239,8 +239,8 @@ module.exports = router;
 
 
 // const express = require("express");
-// const Product = require("../models/Product");
-// const PricingPlan = require("../models/PricingPlan");
+// const Product = require("../modelList/Product");
+// const PricingPlan = require("../modelList/PricingPlan");
 // const auth = require("../middleware/VerifyToken");
 
 // const router = express.Router();
@@ -505,3 +505,4 @@ module.exports = router;
 // });
 
 // module.exports = router;
+

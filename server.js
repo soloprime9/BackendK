@@ -10,7 +10,8 @@ const Demo = require("./routers/demo");
 const cors = require("cors") ;
 const path = require("path");
 
-
+const ProductList = require("./routerLists/product");
+const UserList = require("./routerLists/user");
 
 
 
@@ -47,7 +48,11 @@ app.use("/autoai", Search);
 app.use("/demo", Demo);
 
 
-// app.listen(4000, console.log("This Program run on 4000 Port"));
+
+// Listing URLs 
+app.use("/product", ProductList);
+app.use("/user", UserList);
+
 
 
 app.listen(4000, console.log("Running on Demo 4000"));

@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const ReviewSchema = new Schema({
     product: { type: Schema.Types.ObjectId, ref: "Product" },
@@ -10,3 +10,4 @@ const ReviewSchema = new Schema({
 });
 
 module.exports = model("Review", ReviewSchema);
+

@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const BadgeSchema = new Schema({
     name: String, // "Trending", "New", "Verified"
@@ -7,3 +7,4 @@ const BadgeSchema = new Schema({
 });
 
 module.exports = model("Badge", BadgeSchema);
+

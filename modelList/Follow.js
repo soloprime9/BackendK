@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const FollowSchema = new Schema({
     follower: { type: Schema.Types.ObjectId, ref: "User" },
@@ -7,3 +7,4 @@ const FollowSchema = new Schema({
 });
 
 module.exports = model("Follow", FollowSchema);
+

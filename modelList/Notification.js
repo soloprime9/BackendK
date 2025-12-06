@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const NotificationSchema = new Schema({
     user: { type: Schema.Types.ObjectId, ref: "User" },
@@ -9,3 +9,4 @@ const NotificationSchema = new Schema({
 });
 
 module.exports = model("Notification", NotificationSchema);
+

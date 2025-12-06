@@ -1,4 +1,4 @@
-const { Schema, model } = require("../connection");
+const { Schema, model } = require("../connectionList");
 
 const LocationSchema = new Schema({
     country: String,
@@ -11,3 +11,4 @@ const LocationSchema = new Schema({
 });
 
 module.exports = model("Location", LocationSchema);
+

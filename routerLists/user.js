@@ -59,7 +59,7 @@ router.post("/login", async (req, res) => {
 
     const user = await User.findOne({ email });
     if (!user)
-      return res.status(400).json({ message: "User not found" });
+      return res.status(400).json({ message: "User not found vvvv" });
 
     // Password check
     const match = await bcrypt.compare(password, user.password);
@@ -101,5 +101,6 @@ router.get("/me", verifyToken, async (req, res) => {
 });
 
 module.exports = router;
+
 
 

@@ -2,7 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../modelList/User");
-const { verifyToken } = require("../middleware/VerifyTokenToken");
+const { verifyToken } = require("../middleware/VerifyListToken");
 
 const router = express.Router();
 require("dotenv").config();
@@ -101,4 +101,5 @@ router.get("/me", verifyToken, async (req, res) => {
 });
 
 module.exports = router;
+
 

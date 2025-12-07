@@ -41,11 +41,11 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // app.use(express.static(path.join(__dirname, 'uploads')));
 
-// app.use("/user", User);
-// app.use("/post", Post);
-// // app.use("/content", Content);
-// app.use("/autoai", Search);
-// app.use("/demo", Demo);
+app.use("/user", User);
+app.use("/post", Post);
+// app.use("/content", Content);
+app.use("/autoai", Search);
+app.use("/demo", Demo);
 
 
 

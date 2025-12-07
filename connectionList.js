@@ -6,7 +6,7 @@ mongoose.connect("mongodb+srv://pratikkumar5750:mheekd9tSQqWF3ui@cluster0.x12xsy
     )
 
     .catch(() => {
-        console.log("Not Connected To MongoDataBase")
+        console.log("Not Database Connected ")
     })
 
 module.exports = mongoose;

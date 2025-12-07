@@ -1,5 +1,5 @@
 const { Schema, model } = require("../connectionList");
-
+ 
 const ProductSchema = new Schema({
     title: { type: String, required: true },
     slug: { type: String, required: true, unique: true },
@@ -85,4 +85,5 @@ const ProductSchema = new Schema({
 }, { timestamps: true });
 
 module.exports = model("Product", ProductSchema);
+
 

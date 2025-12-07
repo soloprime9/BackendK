@@ -8,10 +8,10 @@ mongoose.connect(uri, {
     useUnifiedTopology: true
 })
 .then(() => {
-    console.log("Connected to Database");
+    console.log("Connected to Database GGGGG");
 })
 .catch((error) => {
-    console.error("Not Connected to Database", error);
+    console.error("Not Connected to Database VVVVV", error);
 });
 
 module.exports = mongoose;

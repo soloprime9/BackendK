@@ -19,7 +19,7 @@ const UserList = require("./routerLists/user");
 // const io = require("./Socket");
 
 app.use(express.json());
-app.use(cors());
+// app.use(cors());
 
 app.use(cors({
   origin: ['https://computer-xrfg.vercel.app', 'https://www.fondpeace.com', 'http://localhost:3000', "http://localhost:8081"]
@@ -41,11 +41,11 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // app.use(express.static(path.join(__dirname, 'uploads')));
 
-app.use("/user", User);
-app.use("/post", Post);
-// app.use("/content", Content);
-app.use("/autoai", Search);
-app.use("/demo", Demo);
+// app.use("/user", User);
+// app.use("/post", Post);
+// // app.use("/content", Content);
+// app.use("/autoai", Search);
+// app.use("/demo", Demo);
 
 
 

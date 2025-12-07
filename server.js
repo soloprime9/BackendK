@@ -2,16 +2,16 @@ const express = require("express");
 const app = express();
 const mongoose = require("mongoose");
 const jsonwebtoken = require("jsonwebtoken");
-// const Post = require("./routers/Post");
-// const User = require("./routers/User");
-// // const Content = require("./routers/content");
-// const Search = require("./routers/autoai");
-// const Demo = require("./routers/demo");
+const Post = require("./routers/Post");
+const User = require("./routers/User");
+// const Content = require("./routers/content");
+const Search = require("./routers/autoai");
+const Demo = require("./routers/demo");
 const cors = require("cors") ;
 const path = require("path");
 
-const ProductList = require("./routerLists/product");
-const UserList = require("./routerLists/user");
+// const ProductList = require("./routerLists/product");
+// const UserList = require("./routerLists/user");
 
 
 
@@ -41,17 +41,17 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // app.use(express.static(path.join(__dirname, 'uploads')));
 
-// app.use("/user", User);
-// app.use("/post", Post);
-// // app.use("/content", Content);
-// app.use("/autoai", Search);
-// app.use("/demo", Demo);
+app.use("/user", User);
+app.use("/post", Post);
+// app.use("/content", Content);
+app.use("/autoai", Search);
+app.use("/demo", Demo);
 
 
 
 // Listing URLs 
-app.use("/product", ProductList);
-app.use("/user", UserList);
+// app.use("/product", ProductList);
+// app.use("/user", UserList);
 
 
 

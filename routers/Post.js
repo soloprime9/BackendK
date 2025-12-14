@@ -599,7 +599,7 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
     }
 
     const comment = {
-      UserId: userId,
+      userId,
       CommentText,
       likes: 0,
       createdAt: new Date(),

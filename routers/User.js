@@ -98,7 +98,7 @@ router.get('/profile/:id', async (req, res) => {
 });
 
 
-router.get("/:username",verifyToken, async (req, res) => {
+router.get("/profile/:username",verifyToken, async (req, res) => {
 
     const loggedinUser = req.user.UserId;
     const username = req.params.username;

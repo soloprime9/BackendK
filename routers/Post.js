@@ -763,7 +763,10 @@ router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const selectedPost = await Post.findById(id).populate("userId", "username");
+    const selectedPost = await Post.findById(id)
+      .populate("userId", "username")
+      .populate("comments.userId", "username profilePicture");
+    
     if (!selectedPost) {
       return res.status(404).json({ message: "Post not found" });
     }

@@ -464,7 +464,7 @@ router.get('/shorts', async (req, res) => {
 
 router.post("/like/:postId", verifyToken, async (req, res) => {
   try {
-    const UserId = req.user;
+    const UserId = req.user.id;
     const postId = req.params.postId;
     console.log("UserId: ", UserId);
     const like = await Post.findById(postId);

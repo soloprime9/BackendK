@@ -115,6 +115,7 @@
 
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 const multer = require("multer");
 const fs = require("fs"); // Still needed for potential in-memory buffer operations if direct stream is not feasible with ffmpeg
 const path = require("path");

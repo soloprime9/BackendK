@@ -464,9 +464,9 @@ router.get('/shorts', async (req, res) => {
 
 router.post("/like/:postId", verifyToken, async (req, res) => {
   try {
-    const UserId = req.user.UserId;
+    const UserId = req.user;
     const postId = req.params.postId;
-    console.log("UserId, postId: ", UserId, postId);
+    console.log("UserId: ", UserId);
     const like = await Post.findById(postId);
     if (!like) {
       return res.status(404).json("Post is not Found");

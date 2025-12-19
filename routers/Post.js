@@ -487,7 +487,7 @@ if (UserExist) {
 
 
     await like.save();    
-    await res.status(200).json(like);
+    return res.status(200).json({likes: like.likes});
     
     }
     catch(error){

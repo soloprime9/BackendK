@@ -461,41 +461,39 @@ router.get('/shorts', async (req, res) => {
 });
 
 
-router.post("/like/:postId", verifyToken, async(req, res) => {
-    
-    try{
+router.post("/like/:postId", verifyToken, async (req, res) => {
+  try {
     const UserId = req.user.UserId;
-    console.log(UserId);
     const postId = req.params.postId;
+
     const like = await Post.findById(postId);
-    if(!like){
-        res.status(404).json("Post is not Found");
+    if (!like) {
+      return res.status(404).json("Post is not Found");
     }
-    
+
+    const userObjectId = new mongoose.Types.ObjectId(UserId);
 
     const UserExist = like.likes.some(
-  (id) => id.toString() === UserId
-);
+      (id) => id.toString() === UserId
+    );
 
-if (UserExist) {
-  like.likes = like.likes.filter(
-    (id) => id.toString() !== UserId
-  );
-} else {
-  like.likes.push(UserId);
-}
-
-
-    await like.save();    
-    return res.status(200).json({likes: like.likes});
-    
-    }
-    catch(error){
-        res.status(500).json(error);
-        console.log(error);
+    if (UserExist) {
+      like.likes = like.likes.filter(
+        (id) => id.toString() !== UserId
+      );
+    } else {
+      like.likes.push(userObjectId); // ✅ FIX
     }
 
-})
+    await like.save();
+
+    return res.status(200).json({ likes: like.likes });
+
+  } catch (error) {
+    console.log("LIKE ERROR:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
 
 // router.post("/like/:postId", verifyToken, async (req, res) => {
 //   try {

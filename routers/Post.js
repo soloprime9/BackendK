@@ -473,13 +473,18 @@ router.post("/like/:postId", verifyToken, async(req, res) => {
     }
     
 
-    const UserExist = like.likes.includes(UserId);
-    if(UserExist){
-        like.likes = like.likes.filter((id) => id !== UserId);
-    }
-    else{
-        like.likes.push(UserId);
-    }
+    const UserExist = like.likes.some(
+  (id) => id.toString() === UserId
+);
+
+if (UserExist) {
+  like.likes = like.likes.filter(
+    (id) => id.toString() !== UserId
+  );
+} else {
+  like.likes.push(UserId);
+}
+
 
     await like.save();    
     await res.status(200).json(like);

@@ -298,7 +298,8 @@ router.get("/mango/getall", async (req, res) => {
       .populate("comments.userId", "username profilePic")
       .populate("comments.replies.userId", "username profilePic");
 
-    res.status(200).json(posts);
+    // res.status(200).json(posts);
+    console.log("Post: ", posts);
 
   } catch (error) {
     return res.status(500).json({

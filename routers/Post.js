@@ -318,18 +318,19 @@ router.get("/single/search", async (req, res) => {
     // 1️⃣ Split query into words
     const words = q.split(/\s+/).filter(Boolean);
 
-    // 2️⃣ Convert words to regex
-    const regexWords = words.map(word => ({
-      $regex: word,
-      $options: "i",
-    }));
+    // 2️⃣ Build OR conditions
+    const orConditions = [];
 
-    // 3️⃣ Build OR conditions
+    words.forEach(word => {
+      const regex = new RegExp(word, "i");
+
+      orConditions.push({ title: regex });
+      orConditions.push({ hashtags: regex });
+    });
+
+    // 3️⃣ Query DB
     const posts = await Post.find({
-      $or: [
-        { title: { $in: regexWords } },
-        { hashtags: { $in: regexWords } },
-      ],
+      $or: orConditions,
     })
       .select("title thumbnail media mediaType likes comments views userId createdAt")
       .populate("userId", "username profilePic")
@@ -338,10 +339,11 @@ router.get("/single/search", async (req, res) => {
 
     res.json(posts);
   } catch (err) {
-    console.error(err);
+    console.error("Search error:", err);
     res.status(500).json({ error: "Search failed" });
   }
 });
+
 
 
 

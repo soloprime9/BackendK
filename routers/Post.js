@@ -310,28 +310,62 @@ router.get("/mango/getall", async (req, res) => {
 });
 
 
-
 router.get("/single/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
+    // 1️⃣ Split query into words
+    const words = q.split(/\s+/).filter(Boolean);
+
+    // 2️⃣ Convert words to regex
+    const regexWords = words.map(word => ({
+      $regex: word,
+      $options: "i",
+    }));
+
+    // 3️⃣ Build OR conditions
     const posts = await Post.find({
       $or: [
-        { title: { $regex: q, $options: "i" } },
-        { hashtags: { $regex: q, $options: "i" } },
+        { title: { $in: regexWords } },
+        { hashtags: { $in: regexWords } },
       ],
     })
-      .select("title thumbnail media mediaType likes comments views userId")
+      .select("title thumbnail media mediaType likes comments views userId createdAt")
       .populate("userId", "username profilePic")
       .sort({ createdAt: -1 })
       .limit(30);
 
     res.json(posts);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Search failed" });
   }
 });
+
+
+
+// router.get("/single/search", async (req, res) => {
+//   try {
+//     const q = req.query.q?.trim();
+//     if (!q) return res.json([]);
+
+//     const posts = await Post.find({
+//       $or: [
+//         { title: { $regex: q, $options: "i" } },
+//         { hashtags: { $regex: q, $options: "i" } },
+//       ],
+//     })
+//       .select("title thumbnail media mediaType likes comments views userId")
+//       .populate("userId", "username profilePic")
+//       .sort({ createdAt: -1 })
+//       .limit(30);
+
+//     res.json(posts);
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
 
 

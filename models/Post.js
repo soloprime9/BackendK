@@ -10,7 +10,7 @@ const ReplySchema = new Schema({
 const CommentSchema = new Schema({
   CommentText: { type: String, required: true },
   userId: { type: Schema.Types.ObjectId, ref: "User" },
-  likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],,
+  likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
   createdAt: { type: Date, default: Date.now },
   replies: [ReplySchema]  // ✅ Nested replies supported
 }, { _id: true });

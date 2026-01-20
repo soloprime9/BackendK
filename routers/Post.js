@@ -631,105 +631,69 @@ router.post("/comment/:postId/reply/:commentId", verifyToken, async (req, res) =
 
 
 // POST /comment/:postId/like/:commentId
-router.post(
-  "/comment/:postId/like/:commentId",
-  verifyToken,
-  async (req, res) => {
-    try {
-      const { postId, commentId } = req.params;
-      const UserId = req.user.UserId;
+router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const UserId = req.user.UserId;
 
-      const post = await Post.findById(postId);
-      if (!post) return res.status(404).json("Post not found");
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json("Post not found");
 
-      const comment = post.comments.id(commentId);
-      if (!comment) return res.status(404).json("Comment not found");
+    const comment = post.comments.id(commentId);
+    if (!comment) return res.status(404).json("Comment not found");
 
-      const userObjectId = new mongoose.Types.ObjectId(UserId);
+    const userObjectId = new mongoose.Types.ObjectId(UserId);
 
-      // ✅ ensure array
-      if (!Array.isArray(comment.likes)) {
-        comment.likes = [];
-      }
+    const liked = comment.likes.some(id => id.toString() === UserId);
 
-      const userExists = comment.likes.some(
-        (id) => id && id.toString() === UserId
-      );
-
-      if (userExists) {
-        // unlike
-        comment.likes = comment.likes.filter(
-          (id) => id && id.toString() !== UserId
-        );
-      } else {
-        // like
-        comment.likes.push(userObjectId);
-      }
-
-      // cleanup
-      comment.likes = comment.likes.filter(Boolean);
-
-      await post.save();
-
-      res.status(200).json({ likes: comment.likes });
-    } catch (error) {
-      console.log("Comment like error:", error);
-      res.status(500).json("Server Error");
+    if (liked) {
+      comment.likes = comment.likes.filter(id => id.toString() !== UserId);
+    } else {
+      comment.likes.push(userObjectId);
     }
+
+    await post.save();
+    res.status(200).json({ liked: !liked, likesCount: comment.likes.length });
+  } catch (error) {
+    console.error("Comment like error:", error);
+    res.status(500).json({ message: "Server Error" });
   }
-);
+});
 
 
 // POST /comment/:postId/like-reply/:commentId/:replyId
-router.post(
-  "/comment/:postId/like-reply/:commentId/:replyId",
-  verifyToken,
-  async (req, res) => {
-    try {
-      const { postId, commentId, replyId } = req.params;
-      const UserId = req.user.UserId;
+router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, async (req, res) => {
+  try {
+    const { postId, commentId, replyId } = req.params;
+    const UserId = req.user.UserId;
 
-      const post = await Post.findById(postId);
-      if (!post) return res.status(404).json("Post not found");
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json("Post not found");
 
-      const comment = post.comments.id(commentId);
-      if (!comment) return res.status(404).json("Comment not found");
+    const comment = post.comments.id(commentId);
+    if (!comment) return res.status(404).json("Comment not found");
 
-      const reply = comment.replies.id(replyId);
-      if (!reply) return res.status(404).json("Reply not found");
+    const reply = comment.replies.id(replyId);
+    if (!reply) return res.status(404).json("Reply not found");
 
-      const userObjectId = new mongoose.Types.ObjectId(UserId);
+    const userObjectId = new mongoose.Types.ObjectId(UserId);
 
-      // ✅ ensure array
-      if (!Array.isArray(reply.likes)) {
-        reply.likes = [];
-      }
+    const liked = reply.likes.some(id => id.toString() === UserId);
 
-      const userExists = reply.likes.some(
-        (id) => id && id.toString() === UserId
-      );
-
-      if (userExists) {
-        // unlike
-        reply.likes = reply.likes.filter(
-          (id) => id && id.toString() !== UserId
-        );
-      } else {
-        // like
-        reply.likes.push(userObjectId);
-      }
-
-      reply.likes = reply.likes.filter(Boolean);
-
-      await post.save();
-
-      res.status(200).json({ likes: reply.likes });
-    } catch (error) {
-      console.error("Reply like error:", error);
-      res.status(500).json("Server Error");
+    if (liked) {
+      reply.likes = reply.likes.filter(id => id.toString() !== UserId);
+    } else {
+      reply.likes.push(userObjectId);
     }
+
+    await post.save();
+    res.status(200).json({ liked: !liked, likesCount: reply.likes.length });
+  } catch (error) {
+    console.error("Reply like error:", error);
+    res.status(500).json({ message: "Server Error" });
   }
-);
+});
+
 
 
 

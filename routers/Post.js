@@ -607,6 +607,7 @@ router.post("/comment/:postId/reply/:commentId", verifyToken, async (req, res) =
     const { postId, commentId } = req.params;
     const { replyText } = req.body;
     const userId = req.user.UserId;
+    console.log("postId,commentId,userId: ",postId,commentId,userId);
 
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json("Post not found");
@@ -634,6 +635,7 @@ router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) =>
   try {
     const { postId, commentId } = req.params;
     const userId = req.user.UserId;
+    console.log("postId,commentId,userId: ",postId,commentId,userId);
 
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json("Post not found");

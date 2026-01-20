@@ -534,13 +534,13 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
     const comment = {
       userId,
       CommentText,
-      likes: 0,
+      likes: [], // ✅ must be an array of ObjectId
       createdAt: new Date(),
+      replies: [] // ✅ optional, but better to initialize
     };
 
     post.comments.push(comment);
     await post.save({ validateModifiedOnly: true });
-
 
     res.status(200).json(post);
   } catch (error) {
@@ -550,32 +550,6 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
 });
 
 
-// router.post("/comment/:postId", async (req, res) => {
-//   try {
-//     const { userId, CommentText } = req.body; // Destructure userId and CommentText from the request body
-//     const postId = req.params.postId;
-
-//     const post = await Post.findById(postId);
-//     if (!post) {
-//       return res.status(404).json("Post Not Found");
-//     }
-
-//     const comment = {
-//       userId,
-//       CommentText,
-//       likes: 0,
-//       createdAt: new Date(),
-//     };
-
-//     post.comments.push(comment);
-//     await post.save();
-
-//     res.status(200).json(post);
-//   } catch (error) {
-//     console.error("Error adding comment:", error);
-//     res.status(500).json(error.message || "Server Error");
-//   }
-// });
 
 
 

@@ -607,7 +607,6 @@ router.post("/comment/:postId/reply/:commentId", verifyToken, async (req, res) =
     const { postId, commentId } = req.params;
     const { replyText } = req.body;
     const userId = req.user.UserId;
-    console.log("postId,commentId,userId: ",postId,commentId,userId);
 
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json("Post not found");
@@ -618,7 +617,7 @@ router.post("/comment/:postId/reply/:commentId", verifyToken, async (req, res) =
     comment.replies.push({
       userId,
       replyText,
-      likes: []
+      likes: 0   // ✅ NUMBER (matches schema)
     });
 
     await post.save();
@@ -630,12 +629,11 @@ router.post("/comment/:postId/reply/:commentId", verifyToken, async (req, res) =
 });
 
 
+
 // POST /comment/:postId/like/:commentId
 router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) => {
   try {
     const { postId, commentId } = req.params;
-    const userId = req.user.UserId;
-    console.log("postId,commentId,userId: ",postId,commentId,userId);
 
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json("Post not found");
@@ -643,16 +641,11 @@ router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) =>
     const comment = post.comments.id(commentId);
     if (!comment) return res.status(404).json("Comment not found");
 
-    const index = comment.likes.indexOf(userId);
-
-    if (index === -1) {
-      comment.likes.push(userId);
-    } else {
-      comment.likes.splice(index, 1); // Unlike
-    }
+    // ✅ SAFE increment
+    comment.likes = (comment.likes || 0) + 1;
 
     await post.save();
-    res.status(200).json({ liked: index === -1 });
+    res.status(200).json({ likes: comment.likes });
   } catch (error) {
     console.error("Comment like error:", error);
     res.status(500).json("Server Error");
@@ -660,36 +653,35 @@ router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) =>
 });
 
 
+
 // POST /comment/:postId/like-reply/:commentId/:replyId
-router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, async (req, res) => {
-  try {
-    const { postId, commentId, replyId } = req.params;
-    const userId = req.user.UserId;
+router.post(
+  "/comment/:postId/like-reply/:commentId/:replyId",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const { postId, commentId, replyId } = req.params;
 
-    const post = await Post.findById(postId);
-    if (!post) return res.status(404).json("Post not found");
+      const post = await Post.findById(postId);
+      if (!post) return res.status(404).json("Post not found");
 
-    const comment = post.comments.id(commentId);
-    if (!comment) return res.status(404).json("Comment not found");
+      const comment = post.comments.id(commentId);
+      if (!comment) return res.status(404).json("Comment not found");
 
-    const reply = comment.replies.id(replyId);
-    if (!reply) return res.status(404).json("Reply not found");
+      const reply = comment.replies.id(replyId);
+      if (!reply) return res.status(404).json("Reply not found");
 
-    const index = reply.likes.indexOf(userId);
+      // ✅ SAFE increment
+      reply.likes = (reply.likes || 0) + 1;
 
-    if (index === -1) {
-      reply.likes.push(userId);
-    } else {
-      reply.likes.splice(index, 1); // Unlike
+      await post.save();
+      res.status(200).json({ likes: reply.likes });
+    } catch (error) {
+      console.error("Reply like error:", error);
+      res.status(500).json("Server Error");
     }
-
-    await post.save();
-    res.status(200).json({ liked: index === -1 });
-  } catch (error) {
-    console.error("Reply like error:", error);
-    res.status(500).json("Server Error");
   }
-});
+);
 
 
 

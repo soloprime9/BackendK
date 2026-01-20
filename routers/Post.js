@@ -751,6 +751,67 @@ router.get("/single/:id", async (req, res) => {
 });
 
 
+// router.get("/image/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // 1. Fetch Post with Full Nesting
+//     const selectedPost = await Post.findById(id)
+//       .populate("userId", "username profilePic")
+//       .populate({
+//         path: "comments.userId",
+//         select: "username profilePicture"
+//       })
+//       .populate({
+//         path: "comments.replies.userId",
+//         select: "username profilePicture"
+//       });
+
+//     if (!selectedPost) return res.status(404).json({ message: "Post not found" });
+
+//     // 2. View Increment (Non-blocking)
+//     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+
+//     // 3. Smart Related Posts Logic
+//     // Pura title use karne ke bajaye main keywords nikalenge
+//     const titleKeywords = selectedPost.title
+//       ? selectedPost.title.split(" ").filter(word => word.length > 3)
+//       : [];
+
+//     // Search Query: Match Keywords OR just show Latest
+//     let query = { _id: { $ne: id } };
+//     if (titleKeywords.length > 0) {
+//       query.$or = [
+//         { title: { $regex: titleKeywords.join("|"), $options: "i" } },
+//         { tags: { $in: selectedPost.tags } } // Tags matching bhi check karega
+//       ];
+//     }
+
+//     let relatedPosts = await Post.find(query)
+//       .populate("userId", "username")
+//       .sort({ createdAt: -1 }) // Pehle latest dikhao
+//       .limit(10);
+
+//     // Agar matching posts kam hain (Manlo 4 hi mile), toh baki 6 latest videos/posts se bhar do
+//     if (relatedPosts.length < 6) {
+//       const extraPosts = await Post.find({ 
+//         _id: { $ne: id, $nin: relatedPosts.map(p => p._id) } 
+//       })
+//       .sort({ createdAt: -1 })
+//       .limit(10 - relatedPosts.length);
+      
+//       relatedPosts = [...relatedPosts, ...extraPosts];
+//     }
+
+//     res.status(200).json({
+//       post: selectedPost,
+//       related: relatedPosts
+//     });
+//   } catch (error) {
+//     res.status(500).json({ message: "Server Error", error: error.message });
+//   }
+// });
+
 router.get("/image/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -767,118 +828,65 @@ router.get("/image/:id", async (req, res) => {
         select: "username profilePicture"
       });
 
-    if (!selectedPost) return res.status(404).json({ message: "Post not found" });
+    if (!selectedPost) {
+      return res.status(404).json({ message: "Post not found" });
+    }
 
-    // 2. View Increment (Non-blocking)
+    // 🔹 Check if main post is an image
+    const mediaUrl = selectedPost.media || selectedPost.mediaUrl;
+    const isImage =
+      /^image\//i.test(selectedPost.mediaType || "") ||
+      /\.(jpe?g|png|webp|gif|avif|heic|heif|bmp|svg|jfif)$/i.test(mediaUrl || "");
+
+    if (!isImage) {
+      return res
+        .status(400)
+        .json({ message: "This post is not an image." });
+    }
+
+    // 🔹 Increment views
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    // 3. Smart Related Posts Logic
-    // Pura title use karne ke bajaye main keywords nikalenge
-    const titleKeywords = selectedPost.title
-      ? selectedPost.title.split(" ").filter(word => word.length > 3)
+    const { tags, title, mediaType } = selectedPost;
+
+    // 🔹 Build regex for title keywords
+    const titleKeywords = title
+      ? title.split(" ").filter((word) => word.length > 2)
       : [];
 
-    // Search Query: Match Keywords OR just show Latest
-    let query = { _id: { $ne: id } };
-    if (titleKeywords.length > 0) {
-      query.$or = [
-        { title: { $regex: titleKeywords.join("|"), $options: "i" } },
-        { tags: { $in: selectedPost.tags } } // Tags matching bhi check karega
-      ];
+    function escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
 
-    let relatedPosts = await Post.find(query)
+    const titleRegex = titleKeywords.length
+      ? {
+          $or: titleKeywords.map((word) => ({
+            title: { $regex: escapeRegex(word), $options: "i" },
+          })),
+        }
+      : {};
+
+    // 🔹 Related posts: latest videos only
+    const query = {
+      _id: { $ne: id },
+      mediaType: { $not: /^image\//i }, // exclude images
+      ...(titleRegex.$or ? { $or: titleRegex.$or } : {}),
+    };
+
+    const relatedPosts = await Post.find(query)
       .populate("userId", "username")
-      .sort({ createdAt: -1 }) // Pehle latest dikhao
+      .sort({ createdAt: -1 }) // latest videos
       .limit(10);
-
-    // Agar matching posts kam hain (Manlo 4 hi mile), toh baki 6 latest videos/posts se bhar do
-    if (relatedPosts.length < 6) {
-      const extraPosts = await Post.find({ 
-        _id: { $ne: id, $nin: relatedPosts.map(p => p._id) } 
-      })
-      .sort({ createdAt: -1 })
-      .limit(10 - relatedPosts.length);
-      
-      relatedPosts = [...relatedPosts, ...extraPosts];
-    }
 
     res.status(200).json({
       post: selectedPost,
-      related: relatedPosts
+      related: relatedPosts,
     });
   } catch (error) {
+    console.error("Error fetching single image & related videos:", error);
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
-
-// router.get("/image/:id", async (req, res) => {
-//   try {
-//     const { id } = req.params;
-
-//     const selectedPost = await Post.findById(id)
-//       .populate("userId", "username")
-//       .populate("comments.userId", "username profilePicture");
-
-//     if (!selectedPost) {
-//       return res.status(404).json({ message: "Post not found" });
-//     }
-
-//     // 🔹 Check if main post is an image
-//     const mediaUrl = selectedPost.media || selectedPost.mediaUrl;
-//     const isImage =
-//       /^image\//i.test(selectedPost.mediaType || "") ||
-//       /\.(jpe?g|png|webp|gif|avif|heic|heif|bmp|svg|jfif)$/i.test(mediaUrl || "");
-
-//     if (!isImage) {
-//       return res
-//         .status(400)
-//         .json({ message: "This post is not an image." });
-//     }
-
-//     // 🔹 Increment views
-//     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
-
-//     const { tags, title, mediaType } = selectedPost;
-
-//     // 🔹 Build regex for title keywords
-//     const titleKeywords = title
-//       ? title.split(" ").filter((word) => word.length > 2)
-//       : [];
-
-//     function escapeRegex(str) {
-//       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-//     }
-
-//     const titleRegex = titleKeywords.length
-//       ? {
-//           $or: titleKeywords.map((word) => ({
-//             title: { $regex: escapeRegex(word), $options: "i" },
-//           })),
-//         }
-//       : {};
-
-//     // 🔹 Related posts: latest videos only
-//     const query = {
-//       _id: { $ne: id },
-//       mediaType: { $not: /^image\//i }, // exclude images
-//       ...(titleRegex.$or ? { $or: titleRegex.$or } : {}),
-//     };
-
-//     const relatedPosts = await Post.find(query)
-//       .populate("userId", "username")
-//       .sort({ createdAt: -1 }) // latest videos
-//       .limit(10);
-
-//     res.status(200).json({
-//       post: selectedPost,
-//       related: relatedPosts,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching single image & related videos:", error);
-//     res.status(500).json({ message: "Server Error", error: error.message });
-//   }
-// });
 
 
 

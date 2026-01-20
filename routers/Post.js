@@ -635,6 +635,7 @@ router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) =>
   try {
     const { postId, commentId } = req.params;
 
+    console.log("like-reply postId,commentId: ",postId,commentId);
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json("Post not found");
 
@@ -643,11 +644,11 @@ router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) =>
 
     // ✅ SAFE increment
     comment.likes = (comment.likes || 0) + 1;
-
+    
     await post.save();
     res.status(200).json({ likes: comment.likes });
   } catch (error) {
-    console.error("Comment like error:", error);
+    console.log("Comment like error:", error);
     res.status(500).json("Server Error");
   }
 });
@@ -661,6 +662,7 @@ router.post(
   async (req, res) => {
     try {
       const { postId, commentId, replyId } = req.params;
+      console.log("like-reply postId,commentId,replyId: ",postId,commentId,replyId);
 
       const post = await Post.findById(postId);
       if (!post) return res.status(404).json("Post not found");

@@ -631,28 +631,53 @@ router.post("/comment/:postId/reply/:commentId", verifyToken, async (req, res) =
 
 
 // POST /comment/:postId/like/:commentId
-router.post("/comment/:postId/like/:commentId", verifyToken, async (req, res) => {
-  try {
-    const { postId, commentId } = req.params;
+router.post(
+  "/comment/:postId/like/:commentId",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const { postId, commentId } = req.params;
+      const UserId = req.user.UserId;
 
-    console.log("like-reply postId,commentId: ",postId,commentId);
-    const post = await Post.findById(postId);
-    if (!post) return res.status(404).json("Post not found");
+      const post = await Post.findById(postId);
+      if (!post) return res.status(404).json("Post not found");
 
-    const comment = post.comments.id(commentId);
-    if (!comment) return res.status(404).json("Comment not found");
+      const comment = post.comments.id(commentId);
+      if (!comment) return res.status(404).json("Comment not found");
 
-    // ✅ SAFE increment
-    comment.likes = (comment.likes || 0) + 1;
-    
-    await post.save();
-    res.status(200).json({ likes: comment.likes });
-  } catch (error) {
-    console.log("Comment like error:", error);
-    res.status(500).json("Server Error");
+      const userObjectId = new mongoose.Types.ObjectId(UserId);
+
+      // ✅ ensure array
+      if (!Array.isArray(comment.likes)) {
+        comment.likes = [];
+      }
+
+      const userExists = comment.likes.some(
+        (id) => id && id.toString() === UserId
+      );
+
+      if (userExists) {
+        // unlike
+        comment.likes = comment.likes.filter(
+          (id) => id && id.toString() !== UserId
+        );
+      } else {
+        // like
+        comment.likes.push(userObjectId);
+      }
+
+      // cleanup
+      comment.likes = comment.likes.filter(Boolean);
+
+      await post.save();
+
+      res.status(200).json({ likes: comment.likes });
+    } catch (error) {
+      console.log("Comment like error:", error);
+      res.status(500).json("Server Error");
+    }
   }
-});
-
+);
 
 
 // POST /comment/:postId/like-reply/:commentId/:replyId
@@ -662,7 +687,7 @@ router.post(
   async (req, res) => {
     try {
       const { postId, commentId, replyId } = req.params;
-      console.log("like-reply postId,commentId,replyId: ",postId,commentId,replyId);
+      const UserId = req.user.UserId;
 
       const post = await Post.findById(postId);
       if (!post) return res.status(404).json("Post not found");
@@ -673,10 +698,31 @@ router.post(
       const reply = comment.replies.id(replyId);
       if (!reply) return res.status(404).json("Reply not found");
 
-      // ✅ SAFE increment
-      reply.likes = (reply.likes || 0) + 1;
+      const userObjectId = new mongoose.Types.ObjectId(UserId);
+
+      // ✅ ensure array
+      if (!Array.isArray(reply.likes)) {
+        reply.likes = [];
+      }
+
+      const userExists = reply.likes.some(
+        (id) => id && id.toString() === UserId
+      );
+
+      if (userExists) {
+        // unlike
+        reply.likes = reply.likes.filter(
+          (id) => id && id.toString() !== UserId
+        );
+      } else {
+        // like
+        reply.likes.push(userObjectId);
+      }
+
+      reply.likes = reply.likes.filter(Boolean);
 
       await post.save();
+
       res.status(200).json({ likes: reply.likes });
     } catch (error) {
       console.error("Reply like error:", error);

@@ -66,6 +66,22 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
 });
 
 
+router.post("/post/view/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await Post.findByIdAndUpdate(
+      id,
+      { $inc: { views: 1 } },
+      { new: true }
+    );
+
+    res.status(200).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false });
+  }
+});
+
 
 router.get("/mango/getall", async (req, res) => {
   try {

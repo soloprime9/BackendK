@@ -66,7 +66,7 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
 });
 
 
-router.post("/post/view/:id", async (req, res) => {
+router.post("/view/:id", async (req, res) => {
   try {
     const { id } = req.params;
 

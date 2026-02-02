@@ -69,23 +69,28 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
 
 router.get("/mango/getall", async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
     const posts = await Post.find()
-      .sort({ createdAt: -1 })       // Newest first
-      .limit(20)                     // Only latest 20 posts
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .populate("userId", "username profilePic")
       .populate("comments.userId", "username profilePic")
       .populate("comments.replies.userId", "username profilePic");
 
     res.status(200).json(posts);
-    // console.log("Post: ", posts);
 
   } catch (error) {
-    return res.status(500).json({
+    res.status(500).json({
       message: "Error fetching posts",
       error: error.message,
     });
   }
 });
+
 
 
 router.get("/single/search", async (req, res) => {

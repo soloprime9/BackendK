@@ -138,6 +138,36 @@ router.get("/profile/:username",verifyToken, async (req, res) => {
     
 })
 
+router.get("/profile-public/:username", async (req, res) => {
+
+    
+    const username = req.params.username;
+   const user = await User.findOne({username})
+    if(!user){ 
+        return res.status(404).json("user not found");
+    }
+
+
+    const OwnerId = user._id.toString() === loggedinUser;
+    
+    console.log("Owner:" ,OwnerId, "Id", user._id)
+
+    
+        const posts = await Post.find({userId: user._id}).populate("userId", "username");
+
+        res.status(200).json({
+            Profile: {
+                user: user,
+                posts,
+                OwnerId: false
+            }
+        })
+
+    
+    
+})
+
+
 router.get("/mango/search", async(req, res) => {
     try{
     const query = req.query.query;

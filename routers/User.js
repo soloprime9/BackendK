@@ -148,9 +148,9 @@ router.get("/profile-public/:username", async (req, res) => {
     }
 
 
-    const OwnerId = user._id.toString() === loggedinUser;
     
-    console.log("Owner:" ,OwnerId, "Id", user._id)
+    
+    
 
     
         const posts = await Post.find({userId: user._id}).populate("userId", "username");
@@ -158,8 +158,8 @@ router.get("/profile-public/:username", async (req, res) => {
         res.status(200).json({
             Profile: {
                 user: user,
-                posts,
-                OwnerId: false
+                posts
+                
             }
         })
 

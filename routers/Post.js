@@ -83,81 +83,57 @@ router.post("/view/:id", async (req, res) => {
 });
 
 
-router.get("/mango/getall", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = 20;
-
-    // 📅 Time filters
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-
-    // 1️⃣ Latest
-    const latest = await Post.find({
-      createdAt: { $gte: sevenDaysAgo }
-    })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .populate("userId", "username profilePic");
-
-    // 2️⃣ Recent Trending
-    const trending = await Post.find({
-      createdAt: { $gte: threeDaysAgo }
-    })
-      .sort({ views: -1 })
-      .limit(6)
-      .populate("userId", "username profilePic");
-
-    // 3️⃣ Random
-    const random = await Post.aggregate([
-      { $sample: { size: 4 } }
-    ]);
-
-    // 4️⃣ Merge into posts (NOT feed)
-    let posts = [...latest, ...trending, ...random];
-
-    // 5️⃣ Remove duplicates
-    const uniqueMap = new Map();
-    posts.forEach(post => {
-      uniqueMap.set(post._id.toString(), post);
-    });
-
-    posts = Array.from(uniqueMap.values());
-
-    // 6️⃣ Shuffle
-    posts.sort(() => Math.random() - 0.5);
-
-    // 7️⃣ Limit
-    posts = posts.slice(0, limit);
-
-    // ✅ Send posts (same as old API)
-    res.status(200).json(posts);
-
-  } catch (error) {
-    res.status(500).json({
-      message: "Error fetching posts",
-      error: error.message,
-    });
-  }
-});
-
 // router.get("/mango/getall", async (req, res) => {
 //   try {
 //     const page = parseInt(req.query.page) || 1;
 //     const limit = 20;
-//     const skip = (page - 1) * limit;
 
-//     const posts = await Post.find()
+//     // 📅 Time filters
+//     const sevenDaysAgo = new Date();
+//     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+//     const threeDaysAgo = new Date();
+//     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+//     // 1️⃣ Latest
+//     const latest = await Post.find({
+//       createdAt: { $gte: sevenDaysAgo }
+//     })
 //       .sort({ createdAt: -1 })
-//       .skip(skip)
-//       .limit(limit)
-//       .populate("userId", "username profilePic")
-//       .populate("comments.userId", "username profilePic")
-//       .populate("comments.replies.userId", "username profilePic");
+//       .limit(10)
+//       .populate("userId", "username profilePic");
 
+//     // 2️⃣ Recent Trending
+//     const trending = await Post.find({
+//       createdAt: { $gte: threeDaysAgo }
+//     })
+//       .sort({ views: -1 })
+//       .limit(6)
+//       .populate("userId", "username profilePic");
+
+//     // 3️⃣ Random
+//     const random = await Post.aggregate([
+//       { $sample: { size: 4 } }
+//     ]);
+
+//     // 4️⃣ Merge into posts (NOT feed)
+//     let posts = [...latest, ...trending, ...random];
+
+//     // 5️⃣ Remove duplicates
+//     const uniqueMap = new Map();
+//     posts.forEach(post => {
+//       uniqueMap.set(post._id.toString(), post);
+//     });
+
+//     posts = Array.from(uniqueMap.values());
+
+//     // 6️⃣ Shuffle
+//     posts.sort(() => Math.random() - 0.5);
+
+//     // 7️⃣ Limit
+//     posts = posts.slice(0, limit);
+
+//     // ✅ Send posts (same as old API)
 //     res.status(200).json(posts);
 
 //   } catch (error) {
@@ -167,6 +143,30 @@ router.get("/mango/getall", async (req, res) => {
 //     });
 //   }
 // });
+
+router.get("/mango/getall", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
+    const posts = await Post.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("userId", "username profilePic")
+      .populate("comments.userId", "username profilePic")
+      .populate("comments.replies.userId", "username profilePic");
+
+    res.status(200).json(posts);
+
+  } catch (error) {
+    res.status(500).json({
+      message: "Error fetching posts",
+      error: error.message,
+    });
+  }
+});
 
 
 

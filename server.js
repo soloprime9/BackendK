@@ -10,7 +10,7 @@ const User = require("./routers/User");
 const Search = require("./routers/autoai");
 const Demo = require("./routers/demo");
 
-const analyticsRoutes = require("./routes/analytics"); // 👈 your analytics file
+const analyticsRoutes = require("./routers/analytics"); // 👈 your analytics file
 
 const app = express();
 const server = http.createServer(app);

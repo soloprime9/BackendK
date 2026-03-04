@@ -5,6 +5,8 @@ const multer = require("multer");
 const fs = require("fs"); // Still needed for potential in-memory buffer operations if direct stream is not feasible with ffmpeg
 const path = require("path");
 
+const PostAnalytics = require("../models/PostAnalytics");
+
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -174,6 +176,9 @@ router.get("/mango/getall", async (req, res) => {
 //     });
 //   }
 // });
+
+
+
 
 
 

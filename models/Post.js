@@ -30,6 +30,8 @@ const PostSchema = new Schema({
     }, { _id: false })
   },
   mediaType: { type: String, required: true },
+  trendingScore: { type: Number, default: 0 },
+  last24hViews: { type: Number, default: 0 },
   duration: { type: Number, default: 0 },
   views : {type: Number, default: 0},
   likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],

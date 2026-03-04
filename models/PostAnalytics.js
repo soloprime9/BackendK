@@ -6,13 +6,15 @@ const PostAnalyticsSchema = new Schema({
     ref: "Post",
     index: true
   },
+  ip: String,
+  country: String,
+  city: String,
+  userAgent: String,
   timestamp: {
     type: Date,
     default: Date.now,
     index: true
-  },
-  ip: String,
-  userAgent: String
+  }
 });
 
 PostAnalyticsSchema.index({ postId: 1, timestamp: -1 });

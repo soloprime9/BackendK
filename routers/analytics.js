@@ -1,63 +1,97 @@
-const geoip = require("geoip-lite");
-const PostAnalytics = require("../models/PostAnalytics");
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
+
 const Post = require("../models/Post");
-const User = require("../models/User");
+const PostAnalytics = require("../models/PostAnalytics");
+
+/* ==============================
+   TRACK VIEW (ANTI SPAM + SAFE)
+============================== */
+
+
+router.get("/mango/getall", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const skip = (page - 1) * limit;
+
+    const posts = await Post.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("userId", "username profilePic")
+      .populate("comments.userId", "username profilePic")
+      .populate("comments.replies.userId", "username profilePic");
+
+    res.status(200).json(posts);
+
+  } catch (error) {
+    res.status(500).json({
+      message: "Error fetching posts",
+      error: error.message,
+    });
+  }
+});
+
+
 
 
 router.post("/view/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const ip = req.ip;
+
+    // prevent spam (same IP 10 min)
+    const existing = await PostAnalytics.findOne({
+      postId: id,
+      ip,
+      timestamp: { $gte: new Date(Date.now() - 10 * 60 * 1000) }
+    });
+
+    if (existing) {
+      return res.json({ success: true });
+    }
 
     await Post.findByIdAndUpdate(id, {
       $inc: { views: 1 }
     });
 
-    const ip =
-      req.headers["x-forwarded-for"]?.split(",")[0] ||
-      req.socket.remoteAddress;
-
-    const geo = geoip.lookup(ip);
+    const country = req.headers["x-user-country"] || "Unknown";
 
     await PostAnalytics.create({
       postId: id,
+      country,
       ip,
-      country: geo?.country || "Unknown",
-      city: geo?.city || "Unknown",
       userAgent: req.headers["user-agent"]
     });
 
-    // 🔥 emit live update
-    req.app.get("io").emit("newViewGlobal", {
-      postId: id
-    });
+    req.app.get("io").emit("newViewGlobal");
 
-    res.status(200).json({ success: true });
+    res.json({ success: true });
 
   } catch (err) {
     res.status(500).json({ success: false });
   }
 });
 
+/* ==============================
+   TRENDING (7 DAYS)
+============================== */
+
 router.get("/admin/all-traffic", async (req, res) => {
   try {
-    const now = new Date();
-    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const result = await PostAnalytics.aggregate([
-      {
-        $match: { timestamp: { $gte: sevenDaysAgo } }
-      },
+      { $match: { timestamp: { $gte: sevenDaysAgo } } },
       {
         $group: {
           _id: "$postId",
           views7d: { $sum: 1 }
         }
       },
-      {
-        $sort: { views7d: -1 }
-      }
+      { $sort: { views7d: -1 } }
     ]);
 
     const populated = await Post.populate(result, {
@@ -72,29 +106,36 @@ router.get("/admin/all-traffic", async (req, res) => {
   }
 });
 
+/* ==============================
+   SINGLE POST DETAILS
+============================== */
 
 router.get("/admin/post/:id/details", async (req, res) => {
   try {
     const { id } = req.params;
-    const now = new Date();
 
-    const ranges = {
-      "1m": new Date(now - 60 * 1000),
-      "5m": new Date(now - 5 * 60 * 1000),
-      "30m": new Date(now - 30 * 60 * 1000),
-      "1h": new Date(now - 60 * 60 * 1000),
-      "24h": new Date(now - 24 * 60 * 60 * 1000),
-      "7d": new Date(now - 7 * 24 * 60 * 60 * 1000)
-    };
-
-    const traffic = {};
-
-    for (let key in ranges) {
-      traffic[key] = await PostAnalytics.countDocuments({
+    const traffic = {
+      "1m": await PostAnalytics.countDocuments({
         postId: id,
-        timestamp: { $gte: ranges[key] }
-      });
-    }
+        timestamp: { $gte: new Date(Date.now() - 60 * 1000) }
+      }),
+      "5m": await PostAnalytics.countDocuments({
+        postId: id,
+        timestamp: { $gte: new Date(Date.now() - 5 * 60 * 1000) }
+      }),
+      "1h": await PostAnalytics.countDocuments({
+        postId: id,
+        timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) }
+      }),
+      "24h": await PostAnalytics.countDocuments({
+        postId: id,
+        timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+      }),
+      "7d": await PostAnalytics.countDocuments({
+        postId: id,
+        timestamp: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      })
+    };
 
     const locations = await PostAnalytics.aggregate([
       { $match: { postId: new mongoose.Types.ObjectId(id) } },
@@ -103,13 +144,11 @@ router.get("/admin/post/:id/details", async (req, res) => {
           _id: "$country",
           count: { $sum: 1 }
         }
-      }
+      },
+      { $sort: { count: -1 } }
     ]);
 
-    res.json({
-      traffic,
-      locations
-    });
+    res.json({ traffic, locations });
 
   } catch (err) {
     res.status(500).json({ error: err.message });

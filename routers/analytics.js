@@ -10,6 +10,12 @@ const { getIO } = require("../socket"); // ✅ use socket helper
    GET POSTS (PAGINATED)
 ============================== */
 
+router.get("/debug-analytics", async (req, res) => {
+  const all = await PostAnalytics.find().limit(10);
+  res.json(all);
+});
+
+
 router.get("/mango/getall", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;

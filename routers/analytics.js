@@ -4,11 +4,11 @@ const mongoose = require("mongoose");
 
 const Post = require("../models/Post");
 const PostAnalytics = require("../models/PostAnalytics");
+const { getIO } = require("../socket"); // ✅ use socket helper
 
 /* ==============================
-   TRACK VIEW (ANTI SPAM + SAFE)
+   GET POSTS (PAGINATED)
 ============================== */
-
 
 router.get("/mango/getall", async (req, res) => {
   try {
@@ -27,6 +27,7 @@ router.get("/mango/getall", async (req, res) => {
     res.status(200).json(posts);
 
   } catch (error) {
+    console.error("Get posts error:", error);
     res.status(500).json({
       message: "Error fetching posts",
       error: error.message,
@@ -34,15 +35,21 @@ router.get("/mango/getall", async (req, res) => {
   }
 });
 
-
-
+/* ==============================
+   TRACK VIEW (ANTI-SPAM)
+============================== */
 
 router.post("/view/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
+
     const ip = req.ip;
 
-    // prevent spam (same IP 10 min)
+    // Prevent spam (same IP within 10 min)
     const existing = await PostAnalytics.findOne({
       postId: id,
       ip,
@@ -63,14 +70,22 @@ router.post("/view/:id", async (req, res) => {
       postId: id,
       country,
       ip,
-      userAgent: req.headers["user-agent"]
+      userAgent: req.headers["user-agent"],
+      timestamp: new Date()
     });
 
-    req.app.get("io").emit("newViewGlobal");
+    // ✅ SAFE SOCKET EMIT
+    try {
+      const io = getIO();
+      io.emit("newViewGlobal");
+    } catch (socketErr) {
+      console.log("Socket not ready:", socketErr.message);
+    }
 
     res.json({ success: true });
 
   } catch (err) {
+    console.error("View tracking error:", err);
     res.status(500).json({ success: false });
   }
 });
@@ -102,6 +117,7 @@ router.get("/admin/all-traffic", async (req, res) => {
     res.json(populated);
 
   } catch (err) {
+    console.error("Trending error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -114,31 +130,37 @@ router.get("/admin/post/:id/details", async (req, res) => {
   try {
     const { id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid ID" });
+    }
+
+    const objectId = new mongoose.Types.ObjectId(id);
+
     const traffic = {
       "1m": await PostAnalytics.countDocuments({
-        postId: id,
+        postId: objectId,
         timestamp: { $gte: new Date(Date.now() - 60 * 1000) }
       }),
       "5m": await PostAnalytics.countDocuments({
-        postId: id,
+        postId: objectId,
         timestamp: { $gte: new Date(Date.now() - 5 * 60 * 1000) }
       }),
       "1h": await PostAnalytics.countDocuments({
-        postId: id,
+        postId: objectId,
         timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) }
       }),
       "24h": await PostAnalytics.countDocuments({
-        postId: id,
+        postId: objectId,
         timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
       }),
       "7d": await PostAnalytics.countDocuments({
-        postId: id,
+        postId: objectId,
         timestamp: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
       })
     };
 
     const locations = await PostAnalytics.aggregate([
-      { $match: { postId: new mongoose.Types.ObjectId(id) } },
+      { $match: { postId: objectId } },
       {
         $group: {
           _id: "$country",
@@ -151,6 +173,7 @@ router.get("/admin/post/:id/details", async (req, res) => {
     res.json({ traffic, locations });
 
   } catch (err) {
+    console.error("Post details error:", err);
     res.status(500).json({ error: err.message });
   }
 });

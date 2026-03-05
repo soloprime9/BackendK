@@ -53,48 +53,63 @@ router.post("/view/:id", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid ID" });
     }
 
-    // ✅ FIXED IP FOR VERCEL
+    // ✅ Get correct IP (Vercel proxy support)
     const ip =
       req.headers["x-forwarded-for"]?.split(",")[0] ||
       req.socket?.remoteAddress ||
       "0.0.0.0";
 
-    // ✅ FIXED COUNTRY FOR VERCEL
-    const country =
-      req.headers["x-vercel-ip-country"] || "Unknown";
+    // ✅ Get country from Vercel header
+    const country = req.headers["x-vercel-ip-country"] || "Unknown";
 
-    // Prevent spam (same IP within 10 min)
+    // Prevent spam: same IP within 10 min
     const existing = await PostAnalytics.findOne({
       postId: id,
       ip,
-      timestamp: { $gte: new Date(Date.now() - 20 * 60 * 1000) }
+      timestamp: { $gte: new Date(Date.now() - 10 * 60 * 1000) }
     });
 
     if (existing) {
       return res.json({ success: true });
     }
 
-    await Post.findByIdAndUpdate(id, {
-      $inc: { views: 1 }
-    });
+    // Increment main post view counter
+    const post = await Post.findByIdAndUpdate(
+      id,
+      { $inc: { views: 1, last24hViews: 1 } }, // last24hViews for trending
+      { new: true }
+    );
 
+    if (!post) {
+      return res.status(404).json({ success: false, message: "Post not found" });
+    }
+
+    // Store analytics with all useful info
     await PostAnalytics.create({
       postId: id,
       country,
       ip,
-      userAgent: req.headers["user-agent"],
+      city: req.headers["x-vercel-ip-city"] || "Unknown", // optional if available
+      userAgent: req.headers["user-agent"] || "Unknown",
+      mediaType: post.mediaType, // store type for analytics/trending
       timestamp: new Date()
     });
 
-    res.json({ success: true });
+    // ✅ Emit socket event for live dashboard (Render)
+    try {
+      const io = getIO();
+      io.emit("newViewGlobal", { postId: id, views: post.views });
+    } catch (socketErr) {
+      console.log("Socket not ready:", socketErr.message);
+    }
+
+    res.json({ success: true, country, ip });
 
   } catch (err) {
     console.error("View tracking error:", err);
     res.status(500).json({ success: false });
   }
 });
-
-
 /* ==============================
    TRENDING (7 DAYS)
 ============================== */

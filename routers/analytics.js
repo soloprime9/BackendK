@@ -156,6 +156,7 @@ router.get("/admin/post/:id/details", async (req, res) => {
 
     const objectId = new mongoose.Types.ObjectId(id);
 
+    // TRAFFIC COUNTS
     const traffic = {
       "1m": await PostAnalytics.countDocuments({
         postId: objectId,
@@ -179,11 +180,12 @@ router.get("/admin/post/:id/details", async (req, res) => {
       })
     };
 
+    // LOCATIONS WITH COUNTRY + CITY
     const locations = await PostAnalytics.aggregate([
       { $match: { postId: objectId } },
       {
         $group: {
-          _id: "$country",
+          _id: { country: "$country", city: "$city" },
           count: { $sum: 1 }
         }
       },
@@ -197,5 +199,51 @@ router.get("/admin/post/:id/details", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+/* ==============================
+   LIVE TRAFFIC (MULTIPLE TIMEFRAMES)
+============================== */
+router.get("/admin/live-traffic", async (req, res) => {
+  try {
+    const timeframes = {
+      "1m": 60 * 1000,
+      "2m": 2 * 60 * 1000,
+      "5m": 5 * 60 * 1000,
+      "30m": 30 * 60 * 1000,
+      "1h": 60 * 60 * 1000,
+      "24h": 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000
+    };
+
+    const { time } = req.query; // e.g., ?time=5m
+    const duration = timeframes[time] || 60 * 1000;
+    const since = new Date(Date.now() - duration);
+
+    // Aggregate views per post
+    const traffic = await PostAnalytics.aggregate([
+      { $match: { timestamp: { $gte: since } } },
+      {
+        $group: {
+          _id: "$postId",
+          views: { $sum: 1 }
+        }
+      },
+      { $sort: { views: -1 } }
+    ]);
+
+    // Populate post details
+    const populated = await Post.populate(traffic, {
+      path: "_id",
+      select: "title thumbnail views mediaType createdAt"
+    });
+
+    res.json({ traffic: populated });
+  } catch (err) {
+    console.error("Live traffic error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 module.exports = router;

@@ -53,13 +53,21 @@ router.post("/view/:id", async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid ID" });
     }
 
-    const ip = req.ip;
+    // ✅ FIXED IP FOR VERCEL
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket?.remoteAddress ||
+      "0.0.0.0";
+
+    // ✅ FIXED COUNTRY FOR VERCEL
+    const country =
+      req.headers["x-vercel-ip-country"] || "Unknown";
 
     // Prevent spam (same IP within 10 min)
     const existing = await PostAnalytics.findOne({
       postId: id,
       ip,
-      timestamp: { $gte: new Date(Date.now() - 10 * 60 * 1000) }
+      timestamp: { $gte: new Date(Date.now() - 20 * 60 * 1000) }
     });
 
     if (existing) {
@@ -70,8 +78,6 @@ router.post("/view/:id", async (req, res) => {
       $inc: { views: 1 }
     });
 
-    const country = req.headers["x-user-country"] || "Unknown";
-
     await PostAnalytics.create({
       postId: id,
       country,
@@ -80,14 +86,6 @@ router.post("/view/:id", async (req, res) => {
       timestamp: new Date()
     });
 
-    // ✅ SAFE SOCKET EMIT
-    try {
-      const io = getIO();
-      io.emit("newViewGlobal");
-    } catch (socketErr) {
-      console.log("Socket not ready:", socketErr.message);
-    }
-
     res.json({ success: true });
 
   } catch (err) {
@@ -95,6 +93,7 @@ router.post("/view/:id", async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
+
 
 /* ==============================
    TRENDING (7 DAYS)

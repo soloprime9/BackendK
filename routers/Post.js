@@ -88,7 +88,7 @@ router.post("/view/:id", async (req, res) => {
 router.get("/mango/getall", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = 20;
+    const limit = 30;
     const skip = (page - 1) * limit;
 
     // 📅 Time filters

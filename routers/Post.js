@@ -270,44 +270,32 @@ router.get('/shorts', async (req, res) => {
 
   try {
     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
-
-    // ⚡ HACK: Duration limit 120s (2 Minute)
-    // Isse heavy files ignore ho jayengi aur feed fast load hogi
+    
+    // ⚡ FILTER: 2 min limit + Video Only (Fast loading)
     const query = { 
       media: { $regex: videoExtensions },
-      mediaType: 'video', 
-      duration: { $gt: 0, $lte: 120 } // 0 se 120 seconds tak ki videos
+      mediaType: 'video',
+      duration: { $gt: 0, $lte: 120 } 
     };
 
     const total = await Post.countDocuments(query);
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    // 1. LATEST: Newest videos based on page
+    // 1. LATEST: Pure serial-wise (Page ke hisaab se next 5)
     const latest = await Post.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('userId', 'username profilePic');
+      .populate('userId', 'username profilePic')
+      .populate('likes', 'userId');
 
-    // 2. TRENDING: Top trendingScore in last 7 days
-    const trending = await Post.find({
-      ...query,
-      createdAt: { $gte: sevenDaysAgo }
-    })
-      .sort({ trendingScore: -1, views: -1 })
+    // 2. TRENDING: Top views wale (Page ke hisaab se next 5)
+    const trending = await Post.find(query)
+      .sort({ views: -1, trendingScore: -1 })
       .skip(skip)
       .limit(limit)
       .populate('userId', 'username profilePic');
 
-    // 3. HIGH VIEWS: All-time viral content
-    const highViews = await Post.find(query)
-      .sort({ views: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'username profilePic');
-
-    // 4. RANDOM: Har page par naya content discovery ke liye
+    // 3. RANDOM: Discovery (Isme skip nahi lagate taaki hamesha naya mile)
     const random = await Post.aggregate([
       { $match: query },
       { $sample: { size: limit } },
@@ -322,39 +310,34 @@ router.get('/shorts', async (req, res) => {
       { $unwind: { path: '$userId', preserveNullAndEmptyArrays: true } }
     ]);
 
-    // ⚡ MIXING PATTERN: Har category se data utha kar mix karna
-    let combinedPool = [];
+    // ⚡ PATTERN MIXING: Latest -> Trending -> Random -> Latest -> Trending
+    // Isse user ko har scroll par naya pattern milega
+    let mixed = [];
     for (let i = 0; i < limit; i++) {
-      if (latest[i]) combinedPool.push(latest[i]);
-      if (trending[i]) combinedPool.push(trending[i]);
-      if (highViews[i]) combinedPool.push(highViews[i]);
-      if (random[i]) combinedPool.push(random[i]);
+      if (latest[i]) mixed.push(latest[i]);
+      if (trending[i]) mixed.push(trending[i]);
+      if (random[i]) mixed.push(random[i]);
     }
 
-    // Duplicates handle karna (Map use karke)
+    // Remove duplicates (In case latest and trending overlap)
     const uniqueMap = new Map();
-    combinedPool.forEach(v => {
+    mixed.forEach(v => {
       if (v._id) uniqueMap.set(v._id.toString(), v);
     });
     
-    let mixedVideos = Array.from(uniqueMap.values());
-
-    // Shuffle for fresh user experience
-    mixedVideos.sort(() => Math.random() - 0.5);
-
-    // Utna hi data bhejo jitna limit hai
-    const finalResult = mixedVideos.slice(0, limit);
+    // Yahan Slice zaroori hai taaki exactly 'limit' data jaye
+    const finalVideos = Array.from(uniqueMap.values()).slice(0, limit);
 
     res.status(200).json({
       page,
       limit,
       total,
       totalPages: Math.ceil(total / limit),
-      videos: finalResult
+      videos: finalVideos
     });
 
   } catch (error) {
-    console.error('SHORTS_2MIN_ERROR:', error);
+    console.error('PROD_CRITICAL_ERROR:', error);
     res.status(500).json({
       message: 'Server error',
       error: error.message

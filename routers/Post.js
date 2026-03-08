@@ -262,110 +262,71 @@ router.delete("/delete/:postId", async (req, res) => {
 })
 
 
-// router.get("/shorts", async (req, res) => {
-//   const page = parseInt(req.query.page) || 1;
-//   const limit = parseInt(req.query.limit) || 5;
-//   const skip = (page - 1) * limit;
-
-//   try {
-//     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
-
-//     const query = {
-//       media: { $regex: videoExtensions },
-//       mediaType: { $in: ["video", "reel"] },
-//       $or: [
-//         { duration: { $lte: 120 } },
-//         { duration: { $exists: false } }
-//       ]
-//     };
-
-//     const total = await Post.countDocuments(query);
-
-//     const poolSize = limit * 6;
-
-//     // latest
-//     const latest = await Post.find(query)
-//       .sort({ createdAt: -1 })
-//       .limit(poolSize)
-//       .populate("userId", "username profilePic");
-
-//     // trending
-//     const trending = await Post.find(query)
-//       .sort({ views: -1 })
-//       .limit(poolSize)
-//       .populate("userId", "username profilePic");
-
-//     // random
-//     const randomIds = await Post.aggregate([
-//       { $match: query },
-//       { $sample: { size: poolSize } },
-//       { $project: { _id: 1 } }
-//     ]);
-
-//     const random = await Post.find({
-//       _id: { $in: randomIds.map(r => r._id) }
-//     }).populate("userId", "username profilePic");
-
-//     // merge
-//     let videos = [...latest, ...trending, ...random];
-
-//     // remove duplicates
-//     const seen = new Set();
-//     videos = videos.filter(v => {
-//       const id = v._id.toString();
-//       if (seen.has(id)) return false;
-//       seen.add(id);
-//       return true;
-//     });
-
-//     // shuffle
-//     videos.sort(() => Math.random() - 0.5);
-
-//     const result = videos.slice(skip, skip + limit);
-
-//     res.status(200).json({
-//       page,
-//       limit,
-//       total,
-//       totalPages: Math.ceil(total / limit),
-//       videos: result
-//     });
-
-//   } catch (error) {
-//     console.error("Shorts feed error:", error);
-//     res.status(500).json({
-//       message: "Server error",
-//       error: error.message
-//     });
-//   }
-// });
-
-
 router.get('/shorts', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 5;
   const skip = (page - 1) * limit;
 
   try {
+
+    const excludeIds = req.query.exclude
+      ? req.query.exclude.split(',')
+      : [];
+
     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
 
-    const query = { media: { $regex: videoExtensions } };
+    const query = {
+      media: { $regex: videoExtensions },
+      _id: { $nin: excludeIds }
+    };
+
     const total = await Post.countDocuments(query);
 
-    const videos = await Post.find(query)
+    const mostViewed = await Post.find(query)
+      .sort({ views: -1 })
+      .limit(10)
+      .populate('userId', 'username');
+
+    const latest = await Post.find(query)
       .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'username')
-      .populate('comments', 'userId')
-      .populate('likes', 'userId');
+      .limit(10)
+      .populate('userId', 'username');
+
+    const random = await Post.aggregate([
+      { $match: query },
+      { $sample: { size: 10 } }
+    ]);
+
+    const randomPopulated = await Post.populate(random, {
+      path: 'userId',
+      select: 'username'
+    });
+
+    let allVideos = [...mostViewed, ...latest, ...randomPopulated];
+
+    const seen = new Set();
+    allVideos = allVideos.filter(v => {
+      const vid = v._id.toString();
+      if (seen.has(vid)) return false;
+      seen.add(vid);
+      return true;
+    });
+
+    allVideos.sort(() => Math.random() - 0.5);
+
+    const videos = allVideos.slice(skip, skip + limit);
+
+    const populatedVideos = await Post.populate(videos, [
+      { path: 'comments', select: 'userId' },
+      { path: 'likes', select: 'userId' }
+    ]);
 
     res.status(200).json({
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit),
-      videos,
+      totalPages: Math.ceil(allVideos.length / limit),
+      videos: populatedVideos
     });
 
   } catch (error) {
@@ -373,6 +334,41 @@ router.get('/shorts', async (req, res) => {
     res.status(500).json({ message: 'Server error', error });
   }
 });
+
+
+
+// router.get('/shorts', async (req, res) => {
+//   const page = parseInt(req.query.page) || 1;
+//   const limit = parseInt(req.query.limit) || 5;
+//   const skip = (page - 1) * limit;
+
+//   try {
+//     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
+
+//     const query = { media: { $regex: videoExtensions } };
+//     const total = await Post.countDocuments(query);
+
+//     const videos = await Post.find(query)
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(limit)
+//       .populate('userId', 'username')
+//       .populate('comments', 'userId')
+//       .populate('likes', 'userId');
+
+//     res.status(200).json({
+//       page,
+//       limit,
+//       total,
+//       totalPages: Math.ceil(total / limit),
+//       videos,
+//     });
+
+//   } catch (error) {
+//     console.error('Error fetching shorts:', error);
+//     res.status(500).json({ message: 'Server error', error });
+//   }
+// });
 
 
 
@@ -633,20 +629,46 @@ router.get("/single/:id", async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    // increase views
     await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
-    // 🔥 MOST VIEWS POSTS
-    const mostViewedPosts = await Post.find({
-      _id: { $ne: id }
-    })
-      .populate("userId", "username")
+    const mostViewed = await Post.find({ _id: { $ne: id } })
       .sort({ views: -1 })
-      .limit(10);
+      .limit(4)
+      .populate("userId", "username");
+
+    const latestPosts = await Post.find({ _id: { $ne: id } })
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .populate("userId", "username");
+
+    const randomPosts = await Post.aggregate([
+      { $match: { _id: { $ne: selectedPost._id } } },
+      { $sample: { size: 3 } }
+    ]);
+
+    const randomWithUser = await Post.populate(randomPosts, {
+      path: "userId",
+      select: "username"
+    });
+
+    let allPosts = [...mostViewed, ...latestPosts, ...randomWithUser];
+
+    const seen = new Set();
+    allPosts = allPosts.filter(post => {
+      const pid = post._id.toString();
+      if (seen.has(pid)) return false;
+      seen.add(pid);
+      return true;
+    });
+
+    allPosts.sort(() => Math.random() - 0.5);
+
+    const finalPosts = allPosts.slice(0, 10);
 
     res.status(200).json({
       post: selectedPost,
-      related: mostViewedPosts
+      related: finalPosts,
+      relatedIds: finalPosts.map(p => p._id)   // 🔥 important
     });
 
   } catch (error) {
@@ -654,6 +676,7 @@ router.get("/single/:id", async (req, res) => {
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
+
 
 // router.get("/single/:id", async (req, res) => {
 //   try {

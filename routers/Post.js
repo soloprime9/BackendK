@@ -271,77 +271,84 @@ router.get('/shorts', async (req, res) => {
     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
     const query = { media: { $regex: videoExtensions } };
 
+    // 1. Total count for frontend to handle pagination logic
     const total = await Post.countDocuments(query);
 
-    // time filters
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
-    const poolSize = limit * 10;
+    // Bada pool size taaki shuffle ke liye kaafi variety mile
+    const poolSize = 100; 
 
-    // latest
+    // 2. LATEST: Naye uploads (with all interactions)
     const latest = await Post.find({
       ...query,
       createdAt: { $gte: sevenDaysAgo }
     })
       .sort({ createdAt: -1 })
       .limit(poolSize)
-      .populate('userId', 'username');
+      .populate('userId', 'username profilePic')
+      .populate('likes', 'userId')
+      .populate('comments', 'text userId');
 
-    // trending
+    // 3. TRENDING: Recent high views
     const trending = await Post.find({
       ...query,
       createdAt: { $gte: threeDaysAgo }
     })
       .sort({ views: -1 })
       .limit(poolSize)
-      .populate('userId', 'username');
+      .populate('userId', 'username profilePic')
+      .populate('likes', 'userId')
+      .populate('comments', 'text userId');
 
-    // viral
-    const viral = await Post.find(query)
+    // 4. HIGH VIEWS: All-time viral content
+    const highViews = await Post.find(query)
       .sort({ views: -1 })
       .limit(poolSize)
-      .populate('userId', 'username');
+      .populate('userId', 'username profilePic')
+      .populate('likes', 'userId')
+      .populate('comments', 'text userId');
 
-    // random
+    // 5. RANDOM: Mixed discovery
     const random = await Post.aggregate([
       { $match: query },
-      { $sample: { size: poolSize } }
+      { $sample: { size: poolSize } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'userId'
+        }
+      },
+      { $unwind: { path: '$userId', preserveNullAndEmptyArrays: true } }
     ]);
 
-    // merge all
-    let videos = [...latest, ...trending, ...viral, ...random];
+    // Sabko merge karo
+    let allVideos = [...latest, ...trending, ...highViews, ...random];
 
-    // remove duplicates
-    const uniqueVideos = new Map();
-    videos.forEach(v => uniqueVideos.set(v._id.toString(), v));
-    videos = Array.from(uniqueVideos.values());
+    // Duplicates hatao
+    const uniqueMap = new Map();
+    allVideos.forEach(v => {
+      if (v._id) uniqueMap.set(v._id.toString(), v);
+    });
+    let uniqueVideos = Array.from(uniqueMap.values());
 
-    // prevent same creator spam
-    const creatorSet = new Set();
-    const filtered = [];
-
-    for (let v of videos) {
-      const creator = v.userId?._id?.toString() || v.userId?.toString();
-
-      if (!creatorSet.has(creator)) {
-        filtered.push(v);
-        creatorSet.add(creator);
-      }
-
-      if (filtered.length >= poolSize) break;
+    // ⚡ Fisher-Yates Shuffle for true randomness on every refresh
+    for (let i = uniqueVideos.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [uniqueVideos[i], uniqueVideos[j]] = [uniqueVideos[j], uniqueVideos[i]];
     }
 
-    // shuffle
-    filtered.sort(() => Math.random() - 0.5);
+    // ♾️ PAGINATION: Applying slice after shuffle
+    const startIndex = (page - 1) * limit;
+    const paginated = uniqueVideos.slice(startIndex, startIndex + limit);
 
-    // pagination
-    const start = (page - 1) * limit;
-    const paginated = filtered.slice(start, start + limit);
-
+    // 6. EXACT JSON RESPONSE YOU REQUESTED
     res.status(200).json({
       page,
       limit,
@@ -351,10 +358,10 @@ router.get('/shorts', async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Shorts feed error:", error);
+    console.error('CRITICAL_FEED_ERROR:', error);
     res.status(500).json({
-      message: "Server error",
-      error
+      message: 'Server error',
+      error: error.message
     });
   }
 });

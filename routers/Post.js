@@ -611,7 +611,81 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 });
 
 
+router.get("/single/:id", async (req, res) => {
+  try {
 
+    const { id } = req.params;
+
+    const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
+
+    const selectedPost = await Post.findById(id)
+      .populate("userId", "username profilePic")
+      .populate("comments.userId", "username profilePicture");
+
+    if (!selectedPost) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    // increase views
+    Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+
+    const query = {
+      _id: { $ne: selectedPost._id },
+      media: { $regex: videoExtensions },
+      mediaType: "video",
+      duration: { $gt: 0, $lte: 120 }
+    };
+
+    const poolSize = 50;
+
+    // latest pool
+    const latest = await Post.find(query)
+      .sort({ createdAt: -1 })
+      .limit(poolSize)
+      .populate("userId", "username profilePic");
+
+    // trending pool
+    const trending = await Post.find(query)
+      .sort({ views: -1, trendingScore: -1 })
+      .limit(poolSize)
+      .populate("userId", "username profilePic");
+
+    // random pool
+    const random = await Post.aggregate([
+      { $match: query },
+      { $sample: { size: poolSize } }
+    ]);
+
+    // merge pools
+    let feed = [...latest, ...trending, ...random];
+
+    // remove duplicates
+    const map = new Map();
+    feed.forEach(v => {
+      if (v && v._id) map.set(v._id.toString(), v);
+    });
+
+    feed = Array.from(map.values());
+
+    // shuffle for new feed every refresh
+    feed.sort(() => Math.random() - 0.5);
+
+    res.status(200).json({
+      post: selectedPost,   // first video
+      related: feed         // reels feed
+    });
+
+  } catch (error) {
+
+    console.error("Reels feed error:", error);
+
+    res.status(500).json({
+      message: "Server error",
+      error: error.message
+    });
+
+  }
+});
 
 
 // router.get("/single/:id", async (req, res) => {

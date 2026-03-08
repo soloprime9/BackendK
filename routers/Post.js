@@ -614,63 +614,63 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 
 
 
-router.get("/single/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
+// router.get("/single/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
 
-    const selectedPost = await Post.findById(id)
-      .populate("userId", "username")
-      .populate("comments.userId", "username profilePicture");
+//     const selectedPost = await Post.findById(id)
+//       .populate("userId", "username")
+//       .populate("comments.userId", "username profilePicture");
     
-    if (!selectedPost) {
-      return res.status(404).json({ message: "Post not found" });
-    }
+//     if (!selectedPost) {
+//       return res.status(404).json({ message: "Post not found" });
+//     }
 
-    Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+//     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    const { tags, title, mediaType } = selectedPost;
+//     const { tags, title, mediaType } = selectedPost;
 
-    const titleKeywords = title
-      ? title.split(" ").filter((word) => word.length > 2)
-      : [];
+//     const titleKeywords = title
+//       ? title.split(" ").filter((word) => word.length > 2)
+//       : [];
 
-    // 🔥 Regex Escape Function
-    function escapeRegex(str) {
-      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
+//     // 🔥 Regex Escape Function
+//     function escapeRegex(str) {
+//       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+//     }
 
-    const titleRegex = titleKeywords.length
-      ? {
-          $or: titleKeywords.map((word) => ({
-            title: { $regex: escapeRegex(word), $options: "i" },
-          })),
-        }
-      : {};
+//     const titleRegex = titleKeywords.length
+//       ? {
+//           $or: titleKeywords.map((word) => ({
+//             title: { $regex: escapeRegex(word), $options: "i" },
+//           })),
+//         }
+//       : {};
 
-    const query = {
-      _id: { $ne: id },
-      $or: [
-        { tags: { $in: tags } },
-        { mediaType: mediaType },
-        ...(titleRegex.$or || []),
-      ],
-    };
+//     const query = {
+//       _id: { $ne: id },
+//       $or: [
+//         { tags: { $in: tags } },
+//         { mediaType: mediaType },
+//         ...(titleRegex.$or || []),
+//       ],
+//     };
 
-    const relatedPosts = await Post.find(query)
-      .populate("userId", "username")
-      .sort({ mediaType: -1, createdAt: -1 })
-      .limit(10);
+//     const relatedPosts = await Post.find(query)
+//       .populate("userId", "username")
+//       .sort({ mediaType: -1, createdAt: -1 })
+//       .limit(10);
 
-    res.status(200).json({
-      post: selectedPost,
-      related: relatedPosts,
-    });
+//     res.status(200).json({
+//       post: selectedPost,
+//       related: relatedPosts,
+//     });
 
-  } catch (error) {
-    console.error("Error fetching single post & related:", error);
-    res.status(500).json({ message: "Server Error", error: error.message });
-  }
-});
+//   } catch (error) {
+//     console.error("Error fetching single post & related:", error);
+//     res.status(500).json({ message: "Server Error", error: error.message });
+//   }
+// });
 
 
 // router.get("/image/:id", async (req, res) => {

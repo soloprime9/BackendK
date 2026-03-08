@@ -262,16 +262,15 @@ router.delete("/delete/:postId", async (req, res) => {
 })
 
 
-
 router.get('/shorts', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 5;
+  const limit = 5; // Shorts ke liye limit kam rakhte hain taaki fast load ho
   const skip = (page - 1) * limit;
 
   try {
     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
     
-    // ⚡ FILTER: 2 min limit + Video Only (Fast loading)
+    // ⚡ 2 Minute + 10MB (approx) filter
     const query = { 
       media: { $regex: videoExtensions },
       mediaType: 'video',
@@ -280,70 +279,80 @@ router.get('/shorts', async (req, res) => {
 
     const total = await Post.countDocuments(query);
 
-    // 1. LATEST: Pure serial-wise (Page ke hisaab se next 5)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // 1️⃣ Latest: Serial-wise (Always fresh because of skip/limit)
     const latest = await Post.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('userId', 'username profilePic')
-      .populate('likes', 'userId');
+      .populate("userId", "username profilePic")
+      .populate("likes", "userId");
 
-    // 2. TRENDING: Top views wale (Page ke hisaab se next 5)
-    const trending = await Post.find(query)
+    // 2️⃣ Trending: High views (Always fresh because of skip/limit)
+    const trending = await Post.find({
+      ...query,
+      createdAt: { $gte: sevenDaysAgo }
+    })
       .sort({ views: -1, trendingScore: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('userId', 'username profilePic');
+      .populate("userId", "username profilePic");
 
-    // 3. RANDOM: Discovery (Isme skip nahi lagate taaki hamesha naya mile)
+    // 3️⃣ Random: Discovery (Sample har baar naya data uthayega)
     const random = await Post.aggregate([
       { $match: query },
-      { $sample: { size: limit } },
+      { $sample: { size: 3 } }, // Har page par 3 naye random discovery videos
       {
         $lookup: {
-          from: 'users',
-          localField: 'userId',
-          foreignField: '_id',
-          as: 'userId'
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "userId"
         }
       },
-      { $unwind: { path: '$userId', preserveNullAndEmptyArrays: true } }
+      { $unwind: { path: "$userId", preserveNullAndEmptyArrays: true } }
     ]);
 
-    // ⚡ PATTERN MIXING: Latest -> Trending -> Random -> Latest -> Trending
-    // Isse user ko har scroll par naya pattern milega
-    let mixed = [];
-    for (let i = 0; i < limit; i++) {
-      if (latest[i]) mixed.push(latest[i]);
-      if (trending[i]) mixed.push(trending[i]);
-      if (random[i]) mixed.push(random[i]);
-    }
+    // 4️⃣ Merge everything
+    let posts = [...latest, ...trending, ...random];
 
-    // Remove duplicates (In case latest and trending overlap)
+    // 5️⃣ Remove duplicates (Taaki same video loop na ho)
     const uniqueMap = new Map();
-    mixed.forEach(v => {
-      if (v._id) uniqueMap.set(v._id.toString(), v);
+    posts.forEach(post => {
+      if (post._id) uniqueMap.set(post._id.toString(), post);
     });
-    
-    // Yahan Slice zaroori hai taaki exactly 'limit' data jaye
-    const finalVideos = Array.from(uniqueMap.values()).slice(0, limit);
+
+    let finalPosts = Array.from(uniqueMap.values());
+
+    // 6️⃣ Shuffle logic (Pattern mixing ke liye)
+    // Har page par shuffle karenge taaki Latest/Trending/Random mix ho jaye
+    finalPosts.sort(() => Math.random() - 0.5);
+
+    // 7️⃣ Final Limit Control
+    const result = finalPosts.slice(0, limit);
 
     res.status(200).json({
       page,
       limit,
       total,
       totalPages: Math.ceil(total / limit),
-      videos: finalVideos
+      videos: result
     });
 
   } catch (error) {
-    console.error('PROD_CRITICAL_ERROR:', error);
+    console.error('SHORTS_FINAL_CRASH:', error);
     res.status(500).json({
-      message: 'Server error',
-      error: error.message
+      message: "Error fetching shorts",
+      error: error.message,
     });
   }
 });
+
+
+
+
 
 // router.get('/shorts', async (req, res) => {
 //   const page = parseInt(req.query.page) || 1;

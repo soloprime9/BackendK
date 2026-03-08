@@ -266,94 +266,98 @@ router.delete("/delete/:postId", async (req, res) => {
 router.get('/shorts', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 5;
-  const skip = (page - 1) * limit;
 
   try {
     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
-
     const query = { media: { $regex: videoExtensions } };
 
     const total = await Post.countDocuments(query);
 
-    // 📅 Time filters
+    // time filters
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
-    // 1️⃣ Latest shorts
+    const poolSize = limit * 10;
+
+    // latest
     const latest = await Post.find({
       ...query,
       createdAt: { $gte: sevenDaysAgo }
     })
       .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'username')
-      .populate('comments', 'userId')
-      .populate('likes', 'userId');
+      .limit(poolSize)
+      .populate('userId', 'username');
 
-    // 2️⃣ Trending shorts
+    // trending
     const trending = await Post.find({
       ...query,
       createdAt: { $gte: threeDaysAgo }
     })
       .sort({ views: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'username')
-      .populate('comments', 'userId')
-      .populate('likes', 'userId');
+      .limit(poolSize)
+      .populate('userId', 'username');
 
-    // 3️⃣ Most viewed shorts
-    const highViews = await Post.find(query)
+    // viral
+    const viral = await Post.find(query)
       .sort({ views: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('userId', 'username')
-      .populate('comments', 'userId')
-      .populate('likes', 'userId');
+      .limit(poolSize)
+      .populate('userId', 'username');
 
-    // 4️⃣ Random videos
+    // random
     const random = await Post.aggregate([
       { $match: query },
-      { $sample: { size: 4 } }
+      { $sample: { size: poolSize } }
     ]);
 
-    // 5️⃣ Merge all
-    let videos = [...latest, ...trending, ...highViews, ...random];
+    // merge all
+    let videos = [...latest, ...trending, ...viral, ...random];
 
-    // 6️⃣ Remove duplicates
-    const uniqueMap = new Map();
-    videos.forEach(video => {
-      uniqueMap.set(video._id.toString(), video);
-    });
-    videos = Array.from(uniqueMap.values());
+    // remove duplicates
+    const uniqueVideos = new Map();
+    videos.forEach(v => uniqueVideos.set(v._id.toString(), v));
+    videos = Array.from(uniqueVideos.values());
 
-    // 7️⃣ Randomize order EVERY request
-    videos = videos.sort(() => 0.5 - Math.random());
+    // prevent same creator spam
+    const creatorSet = new Set();
+    const filtered = [];
 
-    // 8️⃣ Final limit control
-    videos = videos.slice(0, limit);
+    for (let v of videos) {
+      const creator = v.userId?._id?.toString() || v.userId?.toString();
+
+      if (!creatorSet.has(creator)) {
+        filtered.push(v);
+        creatorSet.add(creator);
+      }
+
+      if (filtered.length >= poolSize) break;
+    }
+
+    // shuffle
+    filtered.sort(() => Math.random() - 0.5);
+
+    // pagination
+    const start = (page - 1) * limit;
+    const paginated = filtered.slice(start, start + limit);
 
     res.status(200).json({
       page,
       limit,
       total,
       totalPages: Math.ceil(total / limit),
-      videos,
+      videos: paginated
     });
 
   } catch (error) {
-    console.error('Error fetching shorts:', error);
+    console.error("Shorts feed error:", error);
     res.status(500).json({
-      message: 'Server error',
+      message: "Server error",
       error
     });
   }
 });
-
 
 
 // router.get('/shorts', async (req, res) => {

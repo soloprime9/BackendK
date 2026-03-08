@@ -621,36 +621,25 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 });
 
 
-
 router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
+    console.log("Requested Post ID:", id);
 
     const selectedPost = await Post.findById(id)
       .populate("userId", "username")
       .populate("comments.userId", "username profilePicture");
 
     if (!selectedPost) {
+      console.log("Post not found:", id);
       return res.status(404).json({ message: "Post not found" });
     }
 
+    console.log("Selected Post:", selectedPost._id);
+
+    // increase views
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
-
-    const { tags = [], title = "" } = selectedPost;
-
-    const titleKeywords = title
-      .split(" ")
-      .filter(word => word.length > 2);
-
-    function escapeRegex(str) {
-      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-
-    const titleRegex = titleKeywords.length
-      ? titleKeywords.map(word => ({
-          title: { $regex: escapeRegex(word), $options: "i" }
-        }))
-      : [];
 
     const baseFilter = {
       _id: { $ne: id },
@@ -661,49 +650,60 @@ router.get("/single/:id", async (req, res) => {
       ]
     };
 
+    console.log("Base Filter:", baseFilter);
+
     const now = new Date();
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(now.getDate() - 7);
 
-    // related
-    const related = await Post.find({
-      ...baseFilter,
-      $or: [
-        { tags: { $in: tags } },
-        ...titleRegex
-      ]
-    })
-      .limit(6)
-      .populate("userId", "username");
+    console.log("Trending Date Start:", sevenDaysAgo);
 
-    // trending
+    // TRENDING
     const trending = await Post.find({
       ...baseFilter,
       createdAt: { $gte: sevenDaysAgo }
     })
       .sort({ views: -1 })
-      .limit(6)
+      .limit(5)
       .populate("userId", "username");
 
-    // latest
+    console.log("Trending Count:", trending.length);
+
+    // MOST VIEWED
+    const mostViewed = await Post.find(baseFilter)
+      .sort({ views: -1 })
+      .limit(5)
+      .populate("userId", "username");
+
+    console.log("Most Viewed Count:", mostViewed.length);
+
+    // LATEST
     const latest = await Post.find(baseFilter)
       .sort({ createdAt: -1 })
-      .limit(6)
+      .limit(5)
       .populate("userId", "username");
 
-    // random
+    console.log("Latest Count:", latest.length);
+
+    // RANDOM
     const randomIds = await Post.aggregate([
       { $match: baseFilter },
       { $sample: { size: 10 } },
       { $project: { _id: 1 } }
     ]);
 
+    console.log("Random IDs Count:", randomIds.length);
+
     const random = await Post.find({
       _id: { $in: randomIds.map(r => r._id) }
     }).populate("userId", "username");
 
-    // merge
-    let posts = [...related, ...trending, ...latest, ...random];
+    console.log("Random Posts Count:", random.length);
+
+    // merge all
+    let posts = [...trending, ...mostViewed, ...latest, ...random];
+
+    console.log("Merged Posts Count:", posts.length);
 
     // remove duplicates
     const seen = new Set();
@@ -714,12 +714,28 @@ router.get("/single/:id", async (req, res) => {
       return true;
     });
 
+    console.log("After Duplicate Removal:", posts.length);
+
     // shuffle
     posts.sort(() => Math.random() - 0.5);
 
+    const finalPosts = posts.slice(0, 10);
+
+    console.log("Final Related Count:", finalPosts.length);
+
     res.status(200).json({
       post: selectedPost,
-      related: posts.slice(0, 10)
+      related: finalPosts,
+
+      // DEBUG DATA (frontend me check kar sakte ho)
+      debug: {
+        trendingCount: trending.length,
+        mostViewedCount: mostViewed.length,
+        latestCount: latest.length,
+        randomCount: random.length,
+        mergedCount: posts.length,
+        finalCount: finalPosts.length
+      }
     });
 
   } catch (error) {
@@ -730,8 +746,6 @@ router.get("/single/:id", async (req, res) => {
     });
   }
 });
-
-
 
 // router.get("/single/:id", async (req, res) => {
 //   try {

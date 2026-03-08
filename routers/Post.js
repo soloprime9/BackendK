@@ -262,6 +262,7 @@ router.delete("/delete/:postId", async (req, res) => {
 })
 
 
+
 router.get('/shorts', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 5;
@@ -271,15 +272,70 @@ router.get('/shorts', async (req, res) => {
     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
 
     const query = { media: { $regex: videoExtensions } };
+
     const total = await Post.countDocuments(query);
 
-    const videos = await Post.find(query)
+    // 📅 Time filters
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+    // 1️⃣ Latest shorts
+    const latest = await Post.find({
+      ...query,
+      createdAt: { $gte: sevenDaysAgo }
+    })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate('userId', 'username')
       .populate('comments', 'userId')
       .populate('likes', 'userId');
+
+    // 2️⃣ Trending shorts
+    const trending = await Post.find({
+      ...query,
+      createdAt: { $gte: threeDaysAgo }
+    })
+      .sort({ views: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('userId', 'username')
+      .populate('comments', 'userId')
+      .populate('likes', 'userId');
+
+    // 3️⃣ Most viewed shorts
+    const highViews = await Post.find(query)
+      .sort({ views: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('userId', 'username')
+      .populate('comments', 'userId')
+      .populate('likes', 'userId');
+
+    // 4️⃣ Random videos
+    const random = await Post.aggregate([
+      { $match: query },
+      { $sample: { size: 4 } }
+    ]);
+
+    // 5️⃣ Merge all
+    let videos = [...latest, ...trending, ...highViews, ...random];
+
+    // 6️⃣ Remove duplicates
+    const uniqueMap = new Map();
+    videos.forEach(video => {
+      uniqueMap.set(video._id.toString(), video);
+    });
+    videos = Array.from(uniqueMap.values());
+
+    // 7️⃣ Randomize order EVERY request
+    videos = videos.sort(() => 0.5 - Math.random());
+
+    // 8️⃣ Final limit control
+    videos = videos.slice(0, limit);
 
     res.status(200).json({
       page,
@@ -291,9 +347,47 @@ router.get('/shorts', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching shorts:', error);
-    res.status(500).json({ message: 'Server error', error });
+    res.status(500).json({
+      message: 'Server error',
+      error
+    });
   }
 });
+
+
+
+// router.get('/shorts', async (req, res) => {
+//   const page = parseInt(req.query.page) || 1;
+//   const limit = parseInt(req.query.limit) || 5;
+//   const skip = (page - 1) * limit;
+
+//   try {
+//     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
+
+//     const query = { media: { $regex: videoExtensions } };
+//     const total = await Post.countDocuments(query);
+
+//     const videos = await Post.find(query)
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(limit)
+//       .populate('userId', 'username')
+//       .populate('comments', 'userId')
+//       .populate('likes', 'userId');
+
+//     res.status(200).json({
+//       page,
+//       limit,
+//       total,
+//       totalPages: Math.ceil(total / limit),
+//       videos,
+//     });
+
+//   } catch (error) {
+//     console.error('Error fetching shorts:', error);
+//     res.status(500).json({ message: 'Server error', error });
+//   }
+// });
 
 
 

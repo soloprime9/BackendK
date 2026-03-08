@@ -611,15 +611,13 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 });
 
 
+
 router.get("/single/:id", async (req, res) => {
   try {
-
     const { id } = req.params;
 
-    const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
-
     const selectedPost = await Post.findById(id)
-      .populate("userId", "username profilePic")
+      .populate("userId", "username")
       .populate("comments.userId", "username profilePicture");
 
     if (!selectedPost) {
@@ -629,63 +627,93 @@ router.get("/single/:id", async (req, res) => {
     // increase views
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    const query = {
-      _id: { $ne: selectedPost._id },
-      media: { $regex: videoExtensions },
+    const { tags, title, mediaType } = selectedPost;
+
+    const titleKeywords = title
+      ? title.split(" ").filter((word) => word.length > 2)
+      : [];
+
+    function escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    const titleRegex = titleKeywords.length
+      ? {
+          $or: titleKeywords.map((word) => ({
+            title: { $regex: escapeRegex(word), $options: "i" },
+          })),
+        }
+      : {};
+
+    const baseFilter = {
+      _id: { $ne: id },
       mediaType: "video",
-      duration: { $gt: 0, $lte: 120 }
+      duration: { $lte: 120 }, // 🚀 only reels
     };
 
-    const poolSize = 50;
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.setDate(now.getDate() - 7));
 
-    // latest pool
-    const latest = await Post.find(query)
+    // 🔥 RELATED
+    const relatedPosts = await Post.find({
+      ...baseFilter,
+      $or: [
+        { tags: { $in: tags } },
+        { mediaType: mediaType },
+        ...(titleRegex.$or || []),
+      ],
+    })
+      .populate("userId", "username")
+      .limit(5);
+
+    // 🔥 TRENDING (last 7 days)
+    const trendingPosts = await Post.find({
+      ...baseFilter,
+      createdAt: { $gte: sevenDaysAgo },
+    })
+      .sort({ views: -1 })
+      .limit(5);
+
+    // 🔥 MOST VIEWED
+    const mostViewed = await Post.find(baseFilter)
+      .sort({ views: -1 })
+      .limit(5);
+
+    // 🔥 LATEST
+    const latestPosts = await Post.find(baseFilter)
       .sort({ createdAt: -1 })
-      .limit(poolSize)
-      .populate("userId", "username profilePic");
+      .limit(5);
 
-    // trending pool
-    const trending = await Post.find(query)
-      .sort({ views: -1, trendingScore: -1 })
-      .limit(poolSize)
-      .populate("userId", "username profilePic");
-
-    // random pool
-    const random = await Post.aggregate([
-      { $match: query },
-      { $sample: { size: poolSize } }
+    // 🔥 RANDOM DISCOVERY
+    const randomPosts = await Post.aggregate([
+      { $match: baseFilter },
+      { $sample: { size: 10 } },
     ]);
 
-    // merge pools
-    let feed = [...latest, ...trending, ...random];
+    // 🚀 MERGE & REMOVE DUPLICATES
+    const allPosts = [
+      ...relatedPosts,
+      ...trendingPosts,
+      ...mostViewed,
+      ...latestPosts,
+      ...randomPosts,
+    ];
 
-    // remove duplicates
-    const map = new Map();
-    feed.forEach(v => {
-      if (v && v._id) map.set(v._id.toString(), v);
-    });
-
-    feed = Array.from(map.values());
-
-    // shuffle for new feed every refresh
-    feed.sort(() => Math.random() - 0.5);
+    const uniquePosts = [
+      ...new Map(allPosts.map((item) => [item._id.toString(), item])).values(),
+    ];
 
     res.status(200).json({
-      post: selectedPost,   // first video
-      related: feed         // reels feed
+      post: selectedPost,
+      related: uniquePosts.slice(0, 6),
     });
-
   } catch (error) {
-
-    console.error("Reels feed error:", error);
-
-    res.status(500).json({
-      message: "Server error",
-      error: error.message
-    });
-
+    console.error("Error fetching single post & related:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
+
+
 
 
 // router.get("/single/:id", async (req, res) => {

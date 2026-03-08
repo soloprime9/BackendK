@@ -625,125 +625,33 @@ router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log("Requested Post ID:", id);
-
     const selectedPost = await Post.findById(id)
       .populate("userId", "username")
       .populate("comments.userId", "username profilePicture");
 
     if (!selectedPost) {
-      console.log("Post not found:", id);
       return res.status(404).json({ message: "Post not found" });
     }
 
-    console.log("Selected Post:", selectedPost._id);
-
     // increase views
-    Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+    await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
-    const baseFilter = {
-      _id: { $ne: id },
-      mediaType: { $in: ["video", "reel"] },
-      $or: [
-        { duration: { $lte: 120 } },
-        { duration: { $exists: false } }
-      ]
-    };
-
-    console.log("Base Filter:", baseFilter);
-
-    const now = new Date();
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(now.getDate() - 7);
-
-    console.log("Trending Date Start:", sevenDaysAgo);
-
-    // TRENDING
-    const trending = await Post.find({
-      ...baseFilter,
-      createdAt: { $gte: sevenDaysAgo }
+    // 🔥 MOST VIEWS POSTS
+    const mostViewedPosts = await Post.find({
+      _id: { $ne: id }
     })
+      .populate("userId", "username")
       .sort({ views: -1 })
-      .limit(5)
-      .populate("userId", "username");
-
-    console.log("Trending Count:", trending.length);
-
-    // MOST VIEWED
-    const mostViewed = await Post.find(baseFilter)
-      .sort({ views: -1 })
-      .limit(5)
-      .populate("userId", "username");
-
-    console.log("Most Viewed Count:", mostViewed.length);
-
-    // LATEST
-    const latest = await Post.find(baseFilter)
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .populate("userId", "username");
-
-    console.log("Latest Count:", latest.length);
-
-    // RANDOM
-    const randomIds = await Post.aggregate([
-      { $match: baseFilter },
-      { $sample: { size: 10 } },
-      { $project: { _id: 1 } }
-    ]);
-
-    console.log("Random IDs Count:", randomIds.length);
-
-    const random = await Post.find({
-      _id: { $in: randomIds.map(r => r._id) }
-    }).populate("userId", "username");
-
-    console.log("Random Posts Count:", random.length);
-
-    // merge all
-    let posts = [...trending, ...mostViewed, ...latest, ...random];
-
-    console.log("Merged Posts Count:", posts.length);
-
-    // remove duplicates
-    const seen = new Set();
-    posts = posts.filter(p => {
-      const pid = p._id.toString();
-      if (seen.has(pid)) return false;
-      seen.add(pid);
-      return true;
-    });
-
-    console.log("After Duplicate Removal:", posts.length);
-
-    // shuffle
-    posts.sort(() => Math.random() - 0.5);
-
-    const finalPosts = posts.slice(0, 10);
-
-    console.log("Final Related Count:", finalPosts.length);
+      .limit(10);
 
     res.status(200).json({
       post: selectedPost,
-      related: finalPosts,
-
-      // DEBUG DATA (frontend me check kar sakte ho)
-      debug: {
-        trendingCount: trending.length,
-        mostViewedCount: mostViewed.length,
-        latestCount: latest.length,
-        randomCount: random.length,
-        mergedCount: posts.length,
-        finalCount: finalPosts.length
-      }
+      related: mostViewedPosts
     });
 
   } catch (error) {
     console.error("Error fetching single post:", error);
-    res.status(500).json({
-      message: "Server Error",
-      error: error.message
-    });
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
 

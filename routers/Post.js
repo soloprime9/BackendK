@@ -262,54 +262,65 @@ router.delete("/delete/:postId", async (req, res) => {
 })
 
 
-router.get('/shorts', async (req, res) => {
+router.get("/shorts", async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 5;
   const skip = (page - 1) * limit;
 
   try {
-    const videoExtensions = /\.(mp4|mov|webm|webm|mkv|avi|flv|m4v)$/i;
+    const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
 
     const query = {
       media: { $regex: videoExtensions },
-      mediaType: "video",
-      duration: { $gt: 0, $lte: 120 }
+      mediaType: { $in: ["video", "reel"] },
+      $or: [
+        { duration: { $lte: 120 } },
+        { duration: { $exists: false } }
+      ]
     };
 
     const total = await Post.countDocuments(query);
 
     const poolSize = limit * 6;
 
-    // latest pool
+    // latest
     const latest = await Post.find(query)
       .sort({ createdAt: -1 })
       .limit(poolSize)
       .populate("userId", "username profilePic");
 
-    // trending pool
+    // trending
     const trending = await Post.find(query)
-      .sort({ views: -1, trendingScore: -1 })
+      .sort({ views: -1 })
       .limit(poolSize)
       .populate("userId", "username profilePic");
 
-    // random pool
-    const random = await Post.aggregate([
+    // random
+    const randomIds = await Post.aggregate([
       { $match: query },
-      { $sample: { size: poolSize } }
+      { $sample: { size: poolSize } },
+      { $project: { _id: 1 } }
     ]);
 
-    // merge pools
+    const random = await Post.find({
+      _id: { $in: randomIds.map(r => r._id) }
+    }).populate("userId", "username profilePic");
+
+    // merge
     let videos = [...latest, ...trending, ...random];
 
     // remove duplicates
-    const map = new Map();
-    videos.forEach(v => map.set(v._id.toString(), v));
-    videos = Array.from(map.values());
+    const seen = new Set();
+    videos = videos.filter(v => {
+      const id = v._id.toString();
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
 
     // shuffle
     videos.sort(() => Math.random() - 0.5);
 
-    // pagination
     const result = videos.slice(skip, skip + limit);
 
     res.status(200).json({
@@ -328,7 +339,6 @@ router.get('/shorts', async (req, res) => {
     });
   }
 });
-
 
 
 // router.get('/shorts', async (req, res) => {
@@ -612,6 +622,117 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 
 
 
+router.get("/single/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const selectedPost = await Post.findById(id)
+      .populate("userId", "username")
+      .populate("comments.userId", "username profilePicture");
+
+    if (!selectedPost) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+
+    const { tags = [], title = "" } = selectedPost;
+
+    const titleKeywords = title
+      .split(" ")
+      .filter(word => word.length > 2);
+
+    function escapeRegex(str) {
+      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    const titleRegex = titleKeywords.length
+      ? titleKeywords.map(word => ({
+          title: { $regex: escapeRegex(word), $options: "i" }
+        }))
+      : [];
+
+    const baseFilter = {
+      _id: { $ne: id },
+      mediaType: { $in: ["video", "reel"] },
+      $or: [
+        { duration: { $lte: 120 } },
+        { duration: { $exists: false } }
+      ]
+    };
+
+    const now = new Date();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(now.getDate() - 7);
+
+    // related
+    const related = await Post.find({
+      ...baseFilter,
+      $or: [
+        { tags: { $in: tags } },
+        ...titleRegex
+      ]
+    })
+      .limit(6)
+      .populate("userId", "username");
+
+    // trending
+    const trending = await Post.find({
+      ...baseFilter,
+      createdAt: { $gte: sevenDaysAgo }
+    })
+      .sort({ views: -1 })
+      .limit(6)
+      .populate("userId", "username");
+
+    // latest
+    const latest = await Post.find(baseFilter)
+      .sort({ createdAt: -1 })
+      .limit(6)
+      .populate("userId", "username");
+
+    // random
+    const randomIds = await Post.aggregate([
+      { $match: baseFilter },
+      { $sample: { size: 10 } },
+      { $project: { _id: 1 } }
+    ]);
+
+    const random = await Post.find({
+      _id: { $in: randomIds.map(r => r._id) }
+    }).populate("userId", "username");
+
+    // merge
+    let posts = [...related, ...trending, ...latest, ...random];
+
+    // remove duplicates
+    const seen = new Set();
+    posts = posts.filter(p => {
+      const pid = p._id.toString();
+      if (seen.has(pid)) return false;
+      seen.add(pid);
+      return true;
+    });
+
+    // shuffle
+    posts.sort(() => Math.random() - 0.5);
+
+    res.status(200).json({
+      post: selectedPost,
+      related: posts.slice(0, 10)
+    });
+
+  } catch (error) {
+    console.error("Error fetching single post:", error);
+    res.status(500).json({
+      message: "Server Error",
+      error: error.message
+    });
+  }
+});
+
+
+
 // router.get("/single/:id", async (req, res) => {
 //   try {
 //     const { id } = req.params;
@@ -619,12 +740,11 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 //     const selectedPost = await Post.findById(id)
 //       .populate("userId", "username")
 //       .populate("comments.userId", "username profilePicture");
-
+    
 //     if (!selectedPost) {
 //       return res.status(404).json({ message: "Post not found" });
 //     }
 
-//     // increase views
 //     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
 //     const { tags, title, mediaType } = selectedPost;
@@ -633,6 +753,7 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 //       ? title.split(" ").filter((word) => word.length > 2)
 //       : [];
 
+//     // 🔥 Regex Escape Function
 //     function escapeRegex(str) {
 //       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 //     }
@@ -645,134 +766,30 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 //         }
 //       : {};
 
-//     const baseFilter = {
+//     const query = {
 //       _id: { $ne: id },
-//       mediaType: "video",
-//       duration: { $lte: 120 }, // 🚀 only reels
-//     };
-
-//     const now = new Date();
-//     const sevenDaysAgo = new Date(now.setDate(now.getDate() - 7));
-
-//     // 🔥 RELATED
-//     const relatedPosts = await Post.find({
-//       ...baseFilter,
 //       $or: [
 //         { tags: { $in: tags } },
 //         { mediaType: mediaType },
 //         ...(titleRegex.$or || []),
 //       ],
-//     })
+//     };
+
+//     const relatedPosts = await Post.find(query)
 //       .populate("userId", "username")
-//       .limit(5);
-
-//     // 🔥 TRENDING (last 7 days)
-//     const trendingPosts = await Post.find({
-//       ...baseFilter,
-//       createdAt: { $gte: sevenDaysAgo },
-//     })
-//       .sort({ views: -1 })
-//       .limit(5);
-
-//     // 🔥 MOST VIEWED
-//     const mostViewed = await Post.find(baseFilter)
-//       .sort({ views: -1 })
-//       .limit(5);
-
-//     // 🔥 LATEST
-//     const latestPosts = await Post.find(baseFilter)
-//       .sort({ createdAt: -1 })
-//       .limit(5);
-
-//     // 🔥 RANDOM DISCOVERY
-//     const randomPosts = await Post.aggregate([
-//       { $match: baseFilter },
-//       { $sample: { size: 10 } },
-//     ]);
-
-//     // 🚀 MERGE & REMOVE DUPLICATES
-//     const allPosts = [
-//       ...relatedPosts,
-//       ...trendingPosts,
-//       ...mostViewed,
-//       ...latestPosts,
-//       ...randomPosts,
-//     ];
-
-//     const uniquePosts = [
-//       ...new Map(allPosts.map((item) => [item._id.toString(), item])).values(),
-//     ];
+//       .sort({ mediaType: -1, createdAt: -1 })
+//       .limit(10);
 
 //     res.status(200).json({
 //       post: selectedPost,
-//       related: uniquePosts.slice(0, 6),
+//       related: relatedPosts,
 //     });
+
 //   } catch (error) {
 //     console.error("Error fetching single post & related:", error);
 //     res.status(500).json({ message: "Server Error", error: error.message });
 //   }
 // });
-
-
-
-
-router.get("/single/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const selectedPost = await Post.findById(id)
-      .populate("userId", "username")
-      .populate("comments.userId", "username profilePicture");
-    
-    if (!selectedPost) {
-      return res.status(404).json({ message: "Post not found" });
-    }
-
-    Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
-
-    const { tags, title, mediaType } = selectedPost;
-
-    const titleKeywords = title
-      ? title.split(" ").filter((word) => word.length > 2)
-      : [];
-
-    // 🔥 Regex Escape Function
-    function escapeRegex(str) {
-      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-
-    const titleRegex = titleKeywords.length
-      ? {
-          $or: titleKeywords.map((word) => ({
-            title: { $regex: escapeRegex(word), $options: "i" },
-          })),
-        }
-      : {};
-
-    const query = {
-      _id: { $ne: id },
-      $or: [
-        { tags: { $in: tags } },
-        { mediaType: mediaType },
-        ...(titleRegex.$or || []),
-      ],
-    };
-
-    const relatedPosts = await Post.find(query)
-      .populate("userId", "username")
-      .sort({ mediaType: -1, createdAt: -1 })
-      .limit(10);
-
-    res.status(200).json({
-      post: selectedPost,
-      related: relatedPosts,
-    });
-
-  } catch (error) {
-    console.error("Error fetching single post & related:", error);
-    res.status(500).json({ message: "Server Error", error: error.message });
-  }
-});
 
 
 // router.get("/image/:id", async (req, res) => {

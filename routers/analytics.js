@@ -19,7 +19,7 @@ router.get("/debug-analytics", async (req, res) => {
 router.get("/mango/getall", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = 30;
+    const limit = 50;
     const skip = (page - 1) * limit;
 
     const posts = await Post.find()

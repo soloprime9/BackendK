@@ -107,42 +107,43 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     let duration = 0;
 
     // Step 2: Handle video
+    
     if (mediaType.startsWith("video")) {
-      log("Generating HD thumbnail...");
-      const thumbFileName = `thumb-${timestamp}.png`;
-      const thumbPath = path.join(os.tmpdir(), thumbFileName);
+  log("Generating HD thumbnail...");
 
-      await new Promise((resolve) => {
-        await generateThumbnail(tempFilePath, thumbFileName);
-          .on("end", resolve)
-          .on("error", (err) => {
-            errLog("❌ Thumbnail generation failed:", err);
-            resolve(); // continue even if thumbnail fails
-          });
-      });
+  const thumbFileName = `thumb-${timestamp}.png`;
 
-      if (fs.existsSync(thumbPath)) {
-        const thumbStream = fs.createReadStream(thumbPath);
-        await r2Client.send(
-          new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: thumbFileName,
-            Body: thumbStream,
-            ContentType: "image/png",
-          })
-        );
-        thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
-        fs.unlinkSync(thumbPath);
-        log("✅ Thumbnail uploaded to R2:", thumbFileName);
-      } else {
-        log("⚠️ Thumbnail missing, using video as fallback.");
-        thumbnailUrl = mediaUrl;
-      }
+  let generatedPath = null;
 
-      // Get video duration in seconds
-      duration = await getVideoDurationSeconds(tempFilePath);
-      log("🎬 Video duration (seconds):", duration);
-    }
+  try {
+    generatedPath = await generateThumbnail(tempFilePath, thumbFileName);
+  } catch (e) {
+    errLog("Thumbnail error:", e);
+  }
+
+  if (generatedPath && fs.existsSync(generatedPath)) {
+    const thumbStream = fs.createReadStream(generatedPath);
+
+    await r2Client.send(
+      new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: thumbFileName,
+        Body: thumbStream,
+        ContentType: "image/png",
+      })
+    );
+
+    thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
+    fs.unlinkSync(generatedPath);
+
+    log("✅ Thumbnail uploaded to R2:", thumbFileName);
+  } else {
+    log("⚠️ Thumbnail missing, using video fallback.");
+    thumbnailUrl = mediaUrl;
+  }
+
+  duration = await getVideoDurationSeconds(tempFilePath);
+}
     // Handle image
     else if (mediaType.startsWith("image")) {
       thumbnailUrl = mediaUrl;

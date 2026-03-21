@@ -30,10 +30,10 @@ function generateThumbnail(tempFilePath, thumbFileName) {
         resolve(null); // fail-safe (server crash नहीं होगा)
       })
       .outputOptions([
-        "-vf thumbnail,scale=1280:-1:flags=lanczos", // ⭐ BEST QUALITY
-        "-frames:v 1",
-        "-q:v 2"
-      ])
+  "-vf thumbnail,scale=640:-1:flags=lanczos",
+  "-frames:v 1",
+  "-q:v 8"
+])
       .output(outputPath)
       .run(); // 🔥 IMPORTANT (save() भी चल सकता है, but run is safer here)
   });

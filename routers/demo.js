@@ -10,6 +10,7 @@ const path = require("path");
 const os = require("os");
 const Post = require("../models/Post");
 const verifyToken = require("../middleware/verifyToken");
+const generateThumbnail = require("../utils/generateThumbnail");
 
 dotenv.config();
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -112,13 +113,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       const thumbPath = path.join(os.tmpdir(), thumbFileName);
 
       await new Promise((resolve) => {
-        ffmpeg(tempFilePath)
-          .screenshots({
-            timestamps: ["00:00:03.000"],
-            filename: thumbFileName,
-            folder: os.tmpdir(),
-            size: "1280x720", // HD thumbnail
-          })
+        await generateThumbnail(tempFilePath, thumbFileName);
           .on("end", resolve)
           .on("error", (err) => {
             errLog("❌ Thumbnail generation failed:", err);

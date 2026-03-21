@@ -111,7 +111,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     if (mediaType.startsWith("video")) {
   log("Generating HD thumbnail...");
 
-  const thumbFileName = `thumb-${timestamp}.png`;
+  const thumbFileName = `thumb-${timestamp}.jpg`;
 
   let generatedPath = null;
 

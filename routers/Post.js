@@ -354,17 +354,14 @@ router.get('/shorts', async (req, res) => {
       ? req.query.exclude.split(',')
       : [];
 
+    const videoFilter = {
+      mediaType: "video"
+    };
+
     const query = {
-  $and: [
-    { _id: { $nin: excludeIds } },
-    {
-      $or: [
-        { mediaType: "video" },
-        { "medias.type": "video" }
-      ]
-    }
-  ]
-};
+      _id: { $nin: excludeIds },
+      ...videoFilter
+    };
 
     const total = await Post.countDocuments(query);
 
@@ -378,15 +375,14 @@ router.get('/shorts', async (req, res) => {
       .limit(10)
       .populate('userId', 'username');
 
+    // ✅ FIX: same filter + excludeIds in aggregation
     const random = await Post.aggregate([
       {
-  $match: {
-    $or: [
-      { mediaType: "video" },
-      { "medias.type": "video" }
-    ]
-  }
-},
+        $match: {
+          _id: { $nin: excludeIds.map(id => new mongoose.Types.ObjectId(id)) },
+          mediaType: "video"
+        }
+      },
       { $sample: { size: 10 } }
     ]);
 
@@ -397,6 +393,7 @@ router.get('/shorts', async (req, res) => {
 
     let allVideos = [...mostViewed, ...latest, ...randomPopulated];
 
+    // ✅ duplicate remove
     const seen = new Set();
     allVideos = allVideos.filter(v => {
       const vid = v._id.toString();
@@ -405,6 +402,7 @@ router.get('/shorts', async (req, res) => {
       return true;
     });
 
+    // ✅ shuffle
     allVideos.sort(() => Math.random() - 0.5);
 
     const videos = allVideos.slice(skip, skip + limit);
@@ -418,7 +416,7 @@ router.get('/shorts', async (req, res) => {
       page,
       limit,
       total,
-      totalPages: Math.ceil(allVideos.length / limit),
+      totalPages: Math.ceil(total / limit), // ✅ FIXED
       videos: populatedVideos
     });
 
@@ -427,7 +425,6 @@ router.get('/shorts', async (req, res) => {
     res.status(500).json({ message: 'Server error', error });
   }
 });
-
 
 
 // router.get('/shorts', async (req, res) => {
@@ -715,12 +712,9 @@ router.get("/single/:id", async (req, res) => {
     const { id } = req.params;
 
     const videoFilter = {
-  $or: [
-    { mediaType: "video" },
-    { "medias.type": "video" }
-  ]
-};
-    
+      mediaType: "video"
+    };
+
     const selectedPost = await Post.findById(id)
       .populate("userId", "username")
       .populate("comments.userId", "username profilePicture");
@@ -732,33 +726,30 @@ router.get("/single/:id", async (req, res) => {
     await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
     const mostViewed = await Post.find({
-  _id: { $ne: id },
-  ...videoFilter
-})
+      _id: { $ne: id },
+      ...videoFilter
+    })
       .sort({ views: -1 })
       .limit(4)
       .populate("userId", "username");
 
     const latestPosts = await Post.find({
-  _id: { $ne: id },
-  ...videoFilter
-})
+      _id: { $ne: id },
+      ...videoFilter
+    })
       .sort({ createdAt: -1 })
       .limit(3)
       .populate("userId", "username");
 
     const randomPosts = await Post.aggregate([
-  {
-    $match: {
-      _id: { $ne: selectedPost._id },
-      $or: [
-        { mediaType: "video" },
-        { "medias.type": "video" }
-      ]
-    }
-  },
-  { $sample: { size: 3 } }
-]);
+      {
+        $match: {
+          _id: { $ne: new mongoose.Types.ObjectId(id) },
+          mediaType: "video"
+        }
+      },
+      { $sample: { size: 3 } }
+    ]);
 
     const randomWithUser = await Post.populate(randomPosts, {
       path: "userId",
@@ -782,7 +773,7 @@ router.get("/single/:id", async (req, res) => {
     res.status(200).json({
       post: selectedPost,
       related: finalPosts,
-      relatedIds: finalPosts.map(p => p._id)   // 🔥 important
+      relatedIds: finalPosts.map(p => p._id)
     });
 
   } catch (error) {
@@ -790,7 +781,6 @@ router.get("/single/:id", async (req, res) => {
     res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
-
 
 // router.get("/single/:id", async (req, res) => {
 //   try {

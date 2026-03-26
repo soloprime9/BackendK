@@ -273,12 +273,17 @@ router.get('/shorts', async (req, res) => {
       ? req.query.exclude.split(',')
       : [];
 
-    const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
-
     const query = {
-      media: { $regex: videoExtensions },
-      _id: { $nin: excludeIds }
-    };
+  $and: [
+    { _id: { $nin: excludeIds } },
+    {
+      $or: [
+        { mediaType: "video" },
+        { "medias.type": "video" }
+      ]
+    }
+  ]
+};
 
     const total = await Post.countDocuments(query);
 
@@ -293,7 +298,14 @@ router.get('/shorts', async (req, res) => {
       .populate('userId', 'username');
 
     const random = await Post.aggregate([
-      { $match: query },
+      {
+  $match: {
+    $or: [
+      { mediaType: "video" },
+      { "medias.type": "video" }
+    ]
+  }
+},
       { $sample: { size: 10 } }
     ]);
 
@@ -621,6 +633,13 @@ router.get("/single/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
+    const videoFilter = {
+  $or: [
+    { mediaType: "video" },
+    { "medias.type": "video" }
+  ]
+};
+    
     const selectedPost = await Post.findById(id)
       .populate("userId", "username")
       .populate("comments.userId", "username profilePicture");
@@ -631,20 +650,34 @@ router.get("/single/:id", async (req, res) => {
 
     await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
-    const mostViewed = await Post.find({ _id: { $ne: id } })
+    const mostViewed = await Post.find({
+  _id: { $ne: id },
+  ...videoFilter
+})
       .sort({ views: -1 })
       .limit(4)
       .populate("userId", "username");
 
-    const latestPosts = await Post.find({ _id: { $ne: id } })
+    const latestPosts = await Post.find({
+  _id: { $ne: id },
+  ...videoFilter
+})
       .sort({ createdAt: -1 })
       .limit(3)
       .populate("userId", "username");
 
     const randomPosts = await Post.aggregate([
-      { $match: { _id: { $ne: selectedPost._id } } },
-      { $sample: { size: 3 } }
-    ]);
+  {
+    $match: {
+      _id: { $ne: selectedPost._id },
+      $or: [
+        { mediaType: "video" },
+        { "medias.type": "video" }
+      ]
+    }
+  },
+  { $sample: { size: 3 } }
+]);
 
     const randomWithUser = await Post.populate(randomPosts, {
       path: "userId",

@@ -1,4 +1,6 @@
 const express = require("express");
+const cron = require("node-cron");
+const axios = require("axios");
 const router = express.Router();
 const mongoose = require("mongoose");
 const multer = require("multer");
@@ -27,6 +29,65 @@ const client = new Client()
 
 const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
+
+
+// 🔥 MAIN FUNCTION
+async function cleanDeadVideos() {
+  const logs = [];
+  let deletedCount = 0;
+
+  try {
+    const posts = await Post.find({ mediaType: "video" });
+
+    for (const post of posts) {
+      try {
+        await axios.head(post.media, { timeout: 5000 });
+      } catch (err) {
+        logs.push({
+          id: post._id,
+          title: post.title,
+          url: post.media,
+          status: "DELETED"
+        });
+
+        await Post.findByIdAndDelete(post._id);
+        deletedCount++;
+      }
+    }
+
+    return {
+      success: true,
+      deletedCount,
+      logs
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+---
+
+# 🌐 1. MANUAL API (👉 जब चाहो run करो)
+
+router.get("/run-cleanup", async (req, res) => {
+  const result = await cleanDeadVideos();
+  res.json(result);
+});
+
+---
+
+# ⏱️ 2. AUTO CRON (background में चलता रहेगा)
+
+cron.schedule("0 */6 * * *", async () => {
+  console.log("🧹 AUTO CLEAN RUNNING...");
+  const result = await cleanDeadVideos();
+  console.log("Deleted:", result.deletedCount);
+});
+
 
 
 router.get("/fix-image-types", async (req, res) => {

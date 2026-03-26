@@ -69,18 +69,15 @@ async function cleanDeadVideos() {
   }
 }
 
----
 
-# 🌐 1. MANUAL API (👉 जब चाहो run करो)
+
 
 router.get("/run-cleanup", async (req, res) => {
   const result = await cleanDeadVideos();
   res.json(result);
 });
 
----
 
-# ⏱️ 2. AUTO CRON (background में चलता रहेगा)
 
 cron.schedule("0 */6 * * *", async () => {
   console.log("🧹 AUTO CLEAN RUNNING...");

@@ -31,79 +31,6 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 
-async function cleanDeadVideos() {
-  const logs = [];
-  let deletedCount = 0;
-
-  try {
-    const posts = await Post.find({ mediaType: "video" });
-
-    console.log("Total video posts:", posts.length);
-
-    for (const post of posts) {
-      try {
-        if (!post.media) {
-          console.log("❌ EMPTY MEDIA:", post._id);
-          continue;
-        }
-
-        await axios.head(post.media, { timeout: 5000 });
-
-      } catch (err) {
-        console.log("❌ ERROR FOUND:");
-        console.log("ID:", post._id);
-        console.log("TITLE:", post.title);
-        console.log("URL:", post.media);
-        console.log("ERROR:", err.message);
-
-        logs.push({
-          id: post._id,
-          title: post.title,
-          url: post.media,
-          error: err.message,
-          status: "DELETED"
-        });
-
-        try {
-          await Post.findByIdAndDelete(post._id);
-          console.log("🔥 DELETED:", post._id);
-          deletedCount++;
-        } catch (deleteErr) {
-          console.log("❌ DELETE ERROR:", deleteErr.message);
-        }
-      }
-    }
-
-    console.log("FINAL DELETED:", deletedCount);
-
-    return {
-      success: true,
-      deletedCount,
-      logs
-    };
-
-  } catch (error) {
-    console.log("❌ MAIN ERROR:", error.message);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
-router.get("/run-cleanup", async (req, res) => {
-  console.log("🚀 API HIT /run-cleanup");
-  const result = await cleanDeadVideos();
-  res.json(result);
-});
-
-cron.schedule("0 */6 * * *", async () => {
-  console.log("⏱️ CRON STARTED");
-  const result = await cleanDeadVideos();
-  console.log("⏱️ CRON DONE. Deleted:", result.deletedCount);
-});
-
-
 
 router.get("/fix-image-types", async (req, res) => {
   const result = await Post.updateMany(
@@ -1191,5 +1118,82 @@ router.get("/video/getall", async (req, res) => {
 //     if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
 //   }
 // });
+
+
+
+// async function cleanDeadVideos() {
+//   const logs = [];
+//   let deletedCount = 0;
+
+//   try {
+//     const posts = await Post.find({ mediaType: "video" });
+
+//     console.log("Total video posts:", posts.length);
+
+//     for (const post of posts) {
+//       try {
+//         if (!post.media) {
+//           console.log("❌ EMPTY MEDIA:", post._id);
+//           continue;
+//         }
+
+//         await axios.head(post.media, { timeout: 5000 });
+
+//       } catch (err) {
+//         console.log("❌ ERROR FOUND:");
+//         console.log("ID:", post._id);
+//         console.log("TITLE:", post.title);
+//         console.log("URL:", post.media);
+//         console.log("ERROR:", err.message);
+
+//         logs.push({
+//           id: post._id,
+//           title: post.title,
+//           url: post.media,
+//           error: err.message,
+//           status: "DELETED"
+//         });
+
+//         try {
+//           await Post.findByIdAndDelete(post._id);
+//           console.log("🔥 DELETED:", post._id);
+//           deletedCount++;
+//         } catch (deleteErr) {
+//           console.log("❌ DELETE ERROR:", deleteErr.message);
+//         }
+//       }
+//     }
+
+//     console.log("FINAL DELETED:", deletedCount);
+
+//     return {
+//       success: true,
+//       deletedCount,
+//       logs
+//     };
+
+//   } catch (error) {
+//     console.log("❌ MAIN ERROR:", error.message);
+//     return {
+//       success: false,
+//       error: error.message
+//     };
+//   }
+// }
+
+// router.get("/run-cleanup", async (req, res) => {
+//   console.log("🚀 API HIT /run-cleanup");
+//   const result = await cleanDeadVideos();
+//   res.json(result);
+// });
+
+// cron.schedule("0 */6 * * *", async () => {
+//   console.log("⏱️ CRON STARTED");
+//   const result = await cleanDeadVideos();
+//   console.log("⏱️ CRON DONE. Deleted:", result.deletedCount);
+// });
+
+
+
 
 module.exports = router;

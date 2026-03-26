@@ -29,6 +29,19 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 
+router.get("/fix-image-types", async (req, res) => {
+  const result = await Post.updateMany(
+    { mediaType: { $regex: /^image\// } }, // image/jpeg, image/png etc
+    { $set: { mediaType: "image" } }
+  );
+
+  res.json({
+    message: "Image types normalized",
+    modified: result.modifiedCount
+  });
+});
+
+
 router.get("/fix-mediaType-full", async (req, res) => {
   // ✅ VIDEO detect
   const videoResult = await Post.updateMany(

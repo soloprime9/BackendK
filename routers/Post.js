@@ -29,27 +29,23 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 
-router.get("/fix-media-type", async (req, res) => {
-  try {
-    const result = await Post.updateMany(
-      {
-        mediaType: { $exists: false },
-        media: { $regex: /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i }
-      },
-      {
-        $set: { mediaType: "video" }
-      }
-    );
+router.get("/fix-mediaType-smart", async (req, res) => {
+  const result = await Post.updateMany(
+    {
+      $or: [
+        { media: { $regex: /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i } },
+        { "medias.url": { $regex: /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i } }
+      ]
+    },
+    {
+      $set: { mediaType: "video" }
+    }
+  );
 
-    res.json({
-      message: "MediaType updated successfully",
-      modifiedCount: result.modifiedCount
-    });
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error", error });
-  }
+  res.json({
+    message: "Video posts updated",
+    modifiedCount: result.modifiedCount
+  });
 });
 
 router.post("/like/:postId", verifyToken, async (req, res) => {

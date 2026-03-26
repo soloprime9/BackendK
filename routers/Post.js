@@ -29,6 +29,55 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 
+router.get("/fix-mediaType-full", async (req, res) => {
+  // ✅ VIDEO detect
+  const videoResult = await Post.updateMany(
+    {
+      $or: [
+        { media: { $regex: /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i } },
+        { "medias.url": { $regex: /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i } }
+      ]
+    },
+    {
+      $set: { mediaType: "video" }
+    }
+  );
+
+  // ✅ IMAGE detect
+  const imageResult = await Post.updateMany(
+    {
+      $or: [
+        { media: { $regex: /\.(jpg|jpeg|png|gif|webp)$/i } },
+        { "medias.url": { $regex: /\.(jpg|jpeg|png|gif|webp)$/i } }
+      ]
+    },
+    {
+      $set: { mediaType: "image" }
+    }
+  );
+
+  res.json({
+    message: "FULL FIX DONE",
+    videoUpdated: videoResult.modifiedCount,
+    imageUpdated: imageResult.modifiedCount
+  });
+});
+
+
+router.get("/check-mediaType", async (req, res) => {
+  const data = await Post.aggregate([
+    {
+      $group: {
+        _id: "$mediaType",
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+
+  res.json(data);
+});
+
+
 router.get("/fix-mediaType-smart", async (req, res) => {
   const result = await Post.updateMany(
     {

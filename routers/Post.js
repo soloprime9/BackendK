@@ -905,81 +905,182 @@ router.get("/single/:id", async (req, res) => {
 //   }
 // });
 
+// router.get("/image/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // 1. Fetch Post with Full Nesting
+//     const selectedPost = await Post.findById(id)
+//       .populate("userId", "username profilePic")
+//       .populate({
+//         path: "comments.userId",
+//         select: "username profilePicture"
+//       })
+//       .populate({
+//         path: "comments.replies.userId",
+//         select: "username profilePicture"
+//       });
+
+//     if (!selectedPost) {
+//       return res.status(404).json({ message: "Post not found" });
+//     }
+
+//     // 🔹 Check if main post is an image
+//     const mediaUrl = selectedPost.media || selectedPost.mediaUrl;
+//     const isImage =
+//       /^image\//i.test(selectedPost.mediaType || "") ||
+//       /\.(jpe?g|png|webp|gif|avif|heic|heif|bmp|svg|jfif)$/i.test(mediaUrl || "");
+
+//     if (!isImage) {
+//       return res
+//         .status(400)
+//         .json({ message: "This post is not an image." });
+//     }
+
+//     // 🔹 Increment views
+//     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+
+//     const { tags, title, mediaType } = selectedPost;
+
+//     // 🔹 Build regex for title keywords
+//     const titleKeywords = title
+//       ? title.split(" ").filter((word) => word.length > 2)
+//       : [];
+
+//     function escapeRegex(str) {
+//       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+//     }
+
+//     const titleRegex = titleKeywords.length
+//       ? {
+//           $or: titleKeywords.map((word) => ({
+//             title: { $regex: escapeRegex(word), $options: "i" },
+//           })),
+//         }
+//       : {};
+
+//     // 🔹 Related posts: latest videos only
+//     const query = {
+//       _id: { $ne: id },
+//       mediaType: { $not: /^image\//i }, // exclude images
+//       ...(titleRegex.$or ? { $or: titleRegex.$or } : {}),
+//     };
+
+//     const relatedPosts = await Post.find(query)
+//       .populate("userId", "username")
+//       .sort({ createdAt: -1 }) // latest videos
+//       .limit(10);
+
+//     res.status(200).json({
+//       post: selectedPost,
+//       related: relatedPosts,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching single image & related videos:", error);
+//     res.status(500).json({ message: "Server Error", error: error.message });
+//   }
+// });
+
+
+
 router.get("/image/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Fetch Post with Full Nesting
+    // =========================
+    // 1. GET MAIN POST
+    // =========================
     const selectedPost = await Post.findById(id)
       .populate("userId", "username profilePic")
       .populate({
         path: "comments.userId",
-        select: "username profilePicture"
+        select: "username profilePicture",
       })
       .populate({
         path: "comments.replies.userId",
-        select: "username profilePicture"
+        select: "username profilePicture",
       });
 
     if (!selectedPost) {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    // 🔹 Check if main post is an image
-    const mediaUrl = selectedPost.media || selectedPost.mediaUrl;
-    const isImage =
-      /^image\//i.test(selectedPost.mediaType || "") ||
-      /\.(jpe?g|png|webp|gif|avif|heic|heif|bmp|svg|jfif)$/i.test(mediaUrl || "");
-
-    if (!isImage) {
-      return res
-        .status(400)
-        .json({ message: "This post is not an image." });
-    }
-
-    // 🔹 Increment views
+    // update views async
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    const { tags, title, mediaType } = selectedPost;
+    const { mediaType, tags = [], title } = selectedPost;
 
-    // 🔹 Build regex for title keywords
+    // =========================
+    // 2. BUILD DYNAMIC FILTER
+    // =========================
+
+    const isVideo = mediaType === "video";
+    const isImage = mediaType === "image";
+
+    // avoid empty tags issue
+    const tagFilter =
+      tags.length > 0 ? { tags: { $in: tags } } : {};
+
+    // title keyword matching (optional boost)
     const titleKeywords = title
-      ? title.split(" ").filter((word) => word.length > 2)
+      ? title.split(" ").filter((w) => w.length > 2)
       : [];
 
-    function escapeRegex(str) {
-      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
+    const titleFilter =
+      titleKeywords.length > 0
+        ? {
+            $or: titleKeywords.map((word) => ({
+              title: { $regex: word, $options: "i" },
+            })),
+          }
+        : {};
 
-    const titleRegex = titleKeywords.length
-      ? {
-          $or: titleKeywords.map((word) => ({
-            title: { $regex: escapeRegex(word), $options: "i" },
-          })),
-        }
-      : {};
+    // =========================
+    // 3. RELATED POSTS QUERY
+    // =========================
 
-    // 🔹 Related posts: latest videos only
-    const query = {
+    const relatedPosts = await Post.find({
       _id: { $ne: id },
-      mediaType: { $not: /^image\//i }, // exclude images
-      ...(titleRegex.$or ? { $or: titleRegex.$or } : {}),
-    };
 
-    const relatedPosts = await Post.find(query)
+      // 🔥 SAME TYPE ONLY (fix mixed image/video issue)
+      mediaType: mediaType,
+
+      // tag + title boost
+      ...tagFilter,
+      ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
+    })
       .populate("userId", "username")
-      .sort({ createdAt: -1 }) // latest videos
-      .limit(10);
+      .sort({
+        trendingScore: -1,
+        createdAt: -1,
+      })
+      .limit(10)
+      .lean();
 
-    res.status(200).json({
+    // =========================
+    // 4. REMOVE DUPLICATES (extra safety)
+    // =========================
+    const uniqueRelated = Array.from(
+      new Map(relatedPosts.map((p) => [p._id.toString(), p])).values()
+    );
+
+    // =========================
+    // RESPONSE
+    // =========================
+
+    return res.status(200).json({
       post: selectedPost,
-      related: relatedPosts,
+      related: uniqueRelated,
     });
   } catch (error) {
-    console.error("Error fetching single image & related videos:", error);
-    res.status(500).json({ message: "Server Error", error: error.message });
+    console.error("Error fetching post:", error);
+    return res.status(500).json({
+      message: "Server Error",
+      error: error.message,
+    });
   }
 });
+
 
 
 

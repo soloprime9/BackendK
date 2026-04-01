@@ -983,13 +983,109 @@ router.get("/single/:id", async (req, res) => {
 
 
 
+// router.get("/image/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // =========================
+//     // 1. GET MAIN POST
+//     // =========================
+//     const selectedPost = await Post.findById(id)
+//       .populate("userId", "username profilePic")
+//       .populate({
+//         path: "comments.userId",
+//         select: "username profilePicture",
+//       })
+//       .populate({
+//         path: "comments.replies.userId",
+//         select: "username profilePicture",
+//       });
+
+//     if (!selectedPost) {
+//       return res.status(404).json({ message: "Post not found" });
+//     }
+
+//     // update views async
+//     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+
+//     const { mediaType, tags = [], title } = selectedPost;
+
+//     // =========================
+//     // 2. BUILD DYNAMIC FILTER
+//     // =========================
+
+//     const isVideo = mediaType === "video";
+//     const isImage = mediaType === "image";
+
+//     // avoid empty tags issue
+//     const tagFilter =
+//       tags.length > 0 ? { tags: { $in: tags } } : {};
+
+//     // title keyword matching (optional boost)
+//     const titleKeywords = title
+//       ? title.split(" ").filter((w) => w.length > 2)
+//       : [];
+
+//     const titleFilter =
+//       titleKeywords.length > 0
+//         ? {
+//             $or: titleKeywords.map((word) => ({
+//               title: { $regex: word, $options: "i" },
+//             })),
+//           }
+//         : {};
+
+//     // =========================
+//     // 3. RELATED POSTS QUERY
+//     // =========================
+
+//     const relatedPosts = await Post.find({
+//       _id: { $ne: id },
+
+//       // 🔥 SAME TYPE ONLY (fix mixed image/video issue)
+//       mediaType: mediaType,
+
+//       // tag + title boost
+//       ...tagFilter,
+//       ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
+//     })
+//       .populate("userId", "username")
+//       .sort({
+//         trendingScore: -1,
+//         createdAt: -1,
+//       })
+//       .limit(10)
+//       .lean();
+
+//     // =========================
+//     // 4. REMOVE DUPLICATES (extra safety)
+//     // =========================
+//     const uniqueRelated = Array.from(
+//       new Map(relatedPosts.map((p) => [p._id.toString(), p])).values()
+//     );
+
+//     // =========================
+//     // RESPONSE
+//     // =========================
+
+//     return res.status(200).json({
+//       post: selectedPost,
+//       related: uniqueRelated,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching post:", error);
+//     return res.status(500).json({
+//       message: "Server Error",
+//       error: error.message,
+//     });
+//   }
+// });
+
+
 router.get("/image/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // =========================
-    // 1. GET MAIN POST
-    // =========================
     const selectedPost = await Post.findById(id)
       .populate("userId", "username profilePic")
       .populate({
@@ -1005,23 +1101,18 @@ router.get("/image/:id", async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    // update views async
+    // increase views
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
     const { mediaType, tags = [], title } = selectedPost;
 
     // =========================
-    // 2. BUILD DYNAMIC FILTER
+    // FILTER BUILD
     // =========================
 
-    const isVideo = mediaType === "video";
-    const isImage = mediaType === "image";
-
-    // avoid empty tags issue
     const tagFilter =
       tags.length > 0 ? { tags: { $in: tags } } : {};
 
-    // title keyword matching (optional boost)
     const titleKeywords = title
       ? title.split(" ").filter((w) => w.length > 2)
       : [];
@@ -1036,42 +1127,62 @@ router.get("/image/:id", async (req, res) => {
         : {};
 
     // =========================
-    // 3. RELATED POSTS QUERY
+    // 1. PRIMARY RELATED POSTS
     // =========================
 
-    const relatedPosts = await Post.find({
+    let relatedPosts = await Post.find({
       _id: { $ne: id },
-
-      // 🔥 SAME TYPE ONLY (fix mixed image/video issue)
       mediaType: mediaType,
-
-      // tag + title boost
       ...tagFilter,
       ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
     })
       .populate("userId", "username")
-      .sort({
-        trendingScore: -1,
-        createdAt: -1,
-      })
+      .sort({ trendingScore: -1, createdAt: -1 })
       .limit(10)
       .lean();
 
     // =========================
-    // 4. REMOVE DUPLICATES (extra safety)
+    // 2. FALLBACK → LATEST SAME TYPE
     // =========================
+
+    if (relatedPosts.length === 0) {
+      relatedPosts = await Post.find({
+        _id: { $ne: id },
+        mediaType: mediaType,
+      })
+        .populate("userId", "username")
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .lean();
+    }
+
+    // =========================
+    // 3. FINAL FALLBACK → ANY LATEST
+    // =========================
+
+    if (relatedPosts.length === 0) {
+      relatedPosts = await Post.find({
+        _id: { $ne: id },
+      })
+        .populate("userId", "username")
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .lean();
+    }
+
+    // =========================
+    // REMOVE DUPLICATES
+    // =========================
+
     const uniqueRelated = Array.from(
       new Map(relatedPosts.map((p) => [p._id.toString(), p])).values()
     );
-
-    // =========================
-    // RESPONSE
-    // =========================
 
     return res.status(200).json({
       post: selectedPost,
       related: uniqueRelated,
     });
+
   } catch (error) {
     console.error("Error fetching post:", error);
     return res.status(500).json({
@@ -1080,9 +1191,6 @@ router.get("/image/:id", async (req, res) => {
     });
   }
 });
-
-
-
 
 router.get("/video/getall", async (req, res) => {
   try {

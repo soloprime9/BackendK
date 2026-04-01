@@ -1104,7 +1104,7 @@ router.get("/image/:id", async (req, res) => {
     // increase views
     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
 
-    const { mediaType, tags = [], title } = selectedPost;
+    const { tags = [], title } = selectedPost;
 
     // =========================
     // FILTER BUILD
@@ -1132,7 +1132,7 @@ router.get("/image/:id", async (req, res) => {
 
     let relatedPosts = await Post.find({
       _id: { $ne: id },
-      mediaType: mediaType,
+      
       ...tagFilter,
       ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
     })

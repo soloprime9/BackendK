@@ -31,6 +31,60 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 
+router.get("/post/:category/:slug", async (req, res) => {
+  try {
+    const { category, slug } = req.params;
+
+    const post = await Post.findOne({ slug })
+      .populate("userId", "name")
+      .lean();
+
+    if (!post) return res.status(404).json({ message: "Not found" });
+
+    // ✅ Fix category slug
+    const categorySlug = post.category.toLowerCase().replace(/\s+/g, "-");
+
+    if (categorySlug !== category) {
+      return res.status(301).json({
+        redirect: `/${categorySlug}/${post.slug}`
+      });
+    }
+
+    // 🔥 Related logic (mix: category + trending + random)
+    const related = await Post.aggregate([
+      { $match: { slug: { $ne: slug } } },
+      {
+        $addFields: {
+          score: {
+            $cond: [
+              { $eq: ["$category", post.category] },
+              3, // same category priority
+              1
+            ]
+          }
+        }
+      },
+      { $sort: { score: -1, createdAt: -1 } }, // new + category
+      { $limit: 6 },
+      {
+        $project: {
+          title: 1,
+          slug: 1,
+          category: 1,
+          thumbnail: 1,
+          createdAt: 1
+        }
+      }
+    ]);
+
+    res.json({ post, related });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 router.get("/fix-image-types", async (req, res) => {
   const result = await Post.updateMany(

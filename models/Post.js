@@ -19,6 +19,7 @@ const CommentSchema = new Schema({
 const PostSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User" },
   title: { type: String, default: "" },
+  slug: { type: String, unique: true, sparse: true },
   tags: [{ type: String, trim: true }],
   media: { type: String, required: true },
   thumbnail: { type: String, default: "" },
@@ -30,6 +31,26 @@ const PostSchema = new Schema({
     }, { _id: false })
   },
   mediaType: { type: String, required: true },
+  category: {
+  type: String,
+  enum: [
+    "TV Shows",
+    "Reality Shows",
+    "Written Updates",
+    "Celebrity News",
+    "Movie News",
+    "Entertainment",
+    "Cricket",
+    "Stock Market",
+    "Technology",
+    "Job Updates",
+    "Health",
+    "Astrology",
+    "Viral News",
+    "Trending News"
+  ],
+  default: "Entertainment"
+},
   trendingScore: { type: Number, default: 0 },
   last24hViews: { type: Number, default: 0 },
   duration: { type: Number, default: 0 },

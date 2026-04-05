@@ -85,7 +85,7 @@ const BUCKET_ID = "685fc9880036ec074baf";
 // });
 
 
-router.get("/:category/:slug", async (req, res) => {
+router.get("/blog/:category/:slug", async (req, res) => {
   try {
     const { category, slug } = req.params;
 

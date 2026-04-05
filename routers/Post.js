@@ -85,80 +85,80 @@ const BUCKET_ID = "685fc9880036ec074baf";
 // });
 
 
-// router.get("/post/:category/:slug", async (req, res) => {
-//   try {
-//     const { category, slug } = req.params;
+router.get("/:category/:slug", async (req, res) => {
+  try {
+    const { category, slug } = req.params;
 
-//     console.log("🌐 Incoming Request:");
-//     console.log("➡️ category (URL):", category);
-//     console.log("➡️ slug (URL):", slug);
+    console.log("🌐 Incoming Request:");
+    console.log("➡️ category (URL):", category);
+    console.log("➡️ slug (URL):", slug);
 
-//     // 🔍 Find post
-//     const post = await Post.findOne({ slug })
-//       .populate("userId", "name")
-//       .lean();
+    // 🔍 Find post
+    const post = await Post.findOne({ slug })
+      .populate("userId", "name")
+      .lean();
 
-//     console.log("📦 DB Post Result:", post);
+    console.log("📦 DB Post Result:", post);
 
-//     // ❌ If not found
-//     if (!post) {
-//       console.log("❌ Post NOT FOUND for slug:", slug);
-//       return res.status(404).json({ message: "Not found" });
-//     }
+    // ❌ If not found
+    if (!post) {
+      console.log("❌ Post NOT FOUND for slug:", slug);
+      return res.status(404).json({ message: "Not found" });
+    }
 
-//     // 🔄 Convert DB category → URL format
-//     const categorySlug = post.category.toLowerCase().replace(/\s+/g, "-");
+    // 🔄 Convert DB category → URL format
+    const categorySlug = post.category.toLowerCase().replace(/\s+/g, "-");
 
-//     console.log("📂 DB category:", post.category);
-//     console.log("🔁 Converted categorySlug:", categorySlug);
-//     console.log("🌍 URL category:", category);
+    console.log("📂 DB category:", post.category);
+    console.log("🔁 Converted categorySlug:", categorySlug);
+    console.log("🌍 URL category:", category);
 
-//     // ⚠️ Category mismatch
-//     if (categorySlug !== category) {
-//       console.log("⚠️ CATEGORY MISMATCH!");
-//       console.log("👉 Should be:", `/${categorySlug}/${post.slug}`);
+    // ⚠️ Category mismatch
+    if (categorySlug !== category) {
+      console.log("⚠️ CATEGORY MISMATCH!");
+      console.log("👉 Should be:", `/${categorySlug}/${post.slug}`);
 
-//       return res.status(301).json({
-//         redirect: `/${categorySlug}/${post.slug}`
-//       });
-//     }
+      return res.status(301).json({
+        redirect: `/${categorySlug}/${post.slug}`
+      });
+    }
 
-//     // 🔥 Related posts
-//     const related = await Post.aggregate([
-//       { $match: { slug: { $ne: slug } } },
-//       {
-//         $addFields: {
-//           score: {
-//             $cond: [
-//               { $eq: ["$category", post.category] },
-//               3,
-//               1
-//             ]
-//           }
-//         }
-//       },
-//       { $sort: { score: -1, createdAt: -1 } },
-//       { $limit: 6 },
-//       {
-//         $project: {
-//           title: 1,
-//           slug: 1,
-//           category: 1,
-//           thumbnail: 1,
-//           createdAt: 1
-//         }
-//       }
-//     ]);
+    // 🔥 Related posts
+    const related = await Post.aggregate([
+      { $match: { slug: { $ne: slug } } },
+      {
+        $addFields: {
+          score: {
+            $cond: [
+              { $eq: ["$category", post.category] },
+              3,
+              1
+            ]
+          }
+        }
+      },
+      { $sort: { score: -1, createdAt: -1 } },
+      { $limit: 6 },
+      {
+        $project: {
+          title: 1,
+          slug: 1,
+          category: 1,
+          thumbnail: 1,
+          createdAt: 1
+        }
+      }
+    ]);
 
-//     console.log("✅ SUCCESS: Post + related sent");
+    console.log("✅ SUCCESS: Post + related sent");
 
-//     res.json({ post, related });
+    res.json({ post, related });
 
-//   } catch (err) {
-//     console.error("🔥 ERROR:", err);
-//     res.status(500).json({ error: err.message });
-//   }
-// });
+  } catch (err) {
+    console.error("🔥 ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 router.get("/fix-image-types", async (req, res) => {

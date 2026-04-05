@@ -65,6 +65,20 @@ function secondsToISO(seconds) {
   return `PT${h ? h + "H" : ""}${m ? m + "M" : ""}${s}S`;
 }
 
+
+function generateSlug(title) {
+  if (!title) return "post";
+
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")   // remove special chars
+    .trim()
+    .split(/\s+/)                  // split into words
+    .slice(0, 6)                  // ✅ keep only first 5–6 words
+    .join("-");                   // join with dash
+}
+
+
 // Test route
 router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
 
@@ -72,7 +86,7 @@ router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
 router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
   const { file } = req;
   const userId = req.user.UserId;
-  const { title, tags } = req.body;
+  const { title, tags, category } = req.body;
 
   if (!file) {
     errLog("No file uploaded!");
@@ -153,11 +167,25 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "Unsupported file type" });
     }
 
+    let slug = generateSlug(title);
+
+// check duplicate
+let existing = await Post.findOne({ slug });
+let count = 1;
+
+while (existing) {
+  slug = `${generateSlug(title)}-${count}`;
+  existing = await Post.findOne({ slug });
+  count++;
+}
+    
     // Step 3: Save post in MongoDB
     log("Saving post in MongoDB...");
     const newPost = new Post({
       userId,
       title,
+      slug, // ✅ NEW
+      category: category || "Entertainment", // ✅ NEW
       tags: tags ? tags.split(",").map((t) => t.trim()) : [],
       media: mediaUrl,
       thumbnail: thumbnailUrl,

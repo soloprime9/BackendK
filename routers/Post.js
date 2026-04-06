@@ -30,6 +30,10 @@ const client = new Client()
 const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
+router.get("/all-ids", async (req, res) => {
+  const posts = await Post.find({}, "_id updatedAt createdAt");
+  res.json(posts);
+});
 
 // router.get("/:category/:slug", async (req, res) => {
 //   try {

@@ -30,6 +30,18 @@ const client = new Client()
 const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
+
+
+router.get("/all-slugs", async (req, res) => {
+  const posts = await Post.find(
+    { slug: { $exists: true, $ne: "" } },
+    "slug category updatedAt createdAt"
+  ).sort({ createdAt: -1 });
+
+  res.json(posts);
+});
+
+
 router.get("/all-ids", async (req, res) => {
   const posts = await Post.find({}, "_id updatedAt createdAt")
     .sort({ createdAt: -1 }); // 🔥 newest first

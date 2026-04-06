@@ -113,7 +113,7 @@ router.get("/blog/:category/:slug", async (req, res) => {
 
     // 🔍 Find post
     const post = await Post.findOne({ slug })
-      .populate("userId", "name")
+      .populate("userId", "username")
       .lean();
 
     console.log("📦 DB Post Result:", post);

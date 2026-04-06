@@ -1330,7 +1330,7 @@ router.get("/image/:id", async (req, res) => {
 router.get("/video/getall", async (req, res) => {
   try {
     // Sirf video posts fetch karo
-    const posts = await Post.find({ mediaType: "video/mp4" }) // sirf video
+    const posts = await Post.find({ mediaType: "video" }) // sirf video
       .sort({ createdAt: -1 }) // newest first
       .populate("userId", "username profilePic")
       .populate("comments.userId", "username profilePic")

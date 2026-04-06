@@ -1327,14 +1327,14 @@ router.get("/image/:id", async (req, res) => {
   }
 });
 
+
 router.get("/video/getall", async (req, res) => {
   try {
-    // Sirf video posts fetch karo
-    const posts = await Post.find({ mediaType: "video" }) // sirf video
-      .sort({ createdAt: -1 }) // newest first
-      .populate("userId", "username profilePic")
-      .populate("comments.userId", "username profilePic")
-      .populate("comments.replies.userId", "username profilePic");
+    const posts = await Post.find({
+      mediaType: { $regex: /^video/i }
+    })
+      .sort({ _id: -1 }) // 🔥 BEST for latest upload
+      .lean();
 
     res.status(200).json(posts);
 
@@ -1345,6 +1345,28 @@ router.get("/video/getall", async (req, res) => {
     });
   }
 });
+
+
+
+// router.get("/video/getall", async (req, res) => {
+//   try {
+//     // Sirf video posts fetch karo
+//     const posts = await Post.find({ mediaType: { $regex: /^video/i } }) // sirf video
+//       .sort({ _id: -1 })
+//       .lean();
+//       .populate("userId", "username profilePic")
+//       .populate("comments.userId", "username profilePic")
+//       .populate("comments.replies.userId", "username profilePic");
+
+//     res.status(200).json(posts);
+
+//   } catch (error) {
+//     res.status(500).json({
+//       message: "Error fetching video posts",
+//       error: error.message,
+//     });
+//   }
+// });
 
 
 

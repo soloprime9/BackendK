@@ -31,7 +31,9 @@ const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
 router.get("/all-ids", async (req, res) => {
-  const posts = await Post.find({}, "_id updatedAt createdAt");
+  const posts = await Post.find({}, "_id updatedAt createdAt")
+    .sort({ createdAt: -1 }); // 🔥 newest first
+
   res.json(posts);
 });
 

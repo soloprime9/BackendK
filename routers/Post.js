@@ -1230,6 +1230,10 @@ router.get("/single/:id", async (req, res) => {
 
 
 router.get("/image/:id", async (req, res) => {
+
+  function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
   try {
     const { id } = req.params;
 
@@ -1265,13 +1269,13 @@ router.get("/image/:id", async (req, res) => {
       : [];
 
     const titleFilter =
-      titleKeywords.length > 0
-        ? {
-            $or: titleKeywords.map((word) => ({
-              title: { $regex: word, $options: "i" },
-            })),
-          }
-        : {};
+  titleKeywords.length > 0
+    ? {
+        $or: titleKeywords.map((word) => ({
+          title: { $regex: escapeRegex(word), $options: "i" },
+        })),
+      }
+    : {};
 
     // =========================
     // 1. PRIMARY RELATED POSTS

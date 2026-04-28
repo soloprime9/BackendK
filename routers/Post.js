@@ -1298,8 +1298,8 @@ router.get("/image/:id", async (req, res) => {
 
     if (relatedPosts.length === 0) {
       relatedPosts = await Post.find({
-        _id: { $ne: id },
-        mediaType: mediaType,
+        _id: { $ne: id }
+        
       })
         .populate("userId", "username")
         .sort({ createdAt: -1 })

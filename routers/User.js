@@ -5,7 +5,7 @@ const dotenv = require("dotenv");
 const jwt = require("jsonwebtoken");
 const verifyToken = require("../middleware/verifyToken");
 const Post = require("../models/Post");
-const { isValidPhoneNumber } = require("libphonenumber-js");
+const { isValidPhoneNumber } = require("libphonenumber-js"); 
 
 dotenv.config();
 

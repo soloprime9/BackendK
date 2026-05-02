@@ -7,6 +7,17 @@ const UserSchema = Schema({
     username: {type: String, default: "", unique:true },
     email: {type: String, required: true},
     password: {type: String, required: true},
+    phone: {
+  type: String,
+  required: true,
+  unique: true,
+  validate: {
+    validator: v => /^\+\d{10,15}$/.test(v)
+  }
+},
+country: String,
+city: String,
+ipAddress: String,
     bio: {type: String, default: "Add About You"},
     Followers: [{type: Schema.Types.ObjectId, ref: "User"}],
     Followings: [{type: Schema.Types.ObjectId, ref: "User"}],

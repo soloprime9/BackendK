@@ -5,6 +5,7 @@ const dotenv = require("dotenv");
 const jwt = require("jsonwebtoken");
 const verifyToken = require("../middleware/verifyToken");
 const Post = require("../models/Post");
+const { isValidPhoneNumber } = require("libphonenumber-js");
 
 dotenv.config();
 
@@ -25,27 +26,69 @@ router.get("/mango/getall", async (req, res) => {
       }
 })
 
-router.post('/add', async (req, res) => {
-    const {username, email, password} = req.body;
-  try{
-    const checkuser = await User.findOne({username});
-    if(checkuser) {
-       return res.status(404).json({message: "username Already Exists"});
-    }
-    checkEmail = await User.findOne({email});
-    if(checkEmail){
-        return res.status(404).json({message: "Email Already Exists"});
-    }
-    const  UserDetail = await new User(req.body).save();
-      res.status(200).json({message: "Your Account Successfully Created", UserDetail});
-      console.log(UserDetail);
 
+
+router.post('/add', async (req, res) => {
+  const { username, email, password, phone, country, city } = req.body;
+
+  try {
+    // 🔴 1. Required fields check
+    if (!username || !email || !password || !phone) {
+      return res.status(400).json({ message: "All fields are required" });
     }
-    catch(error){
-        res.status(500).json({message: "Internal Server Error"});
-       console.log(error)
+
+    // 🔴 2. Phone validation
+    if (!isValidPhoneNumber(phone)) {
+      return res.status(400).json({ message: "Invalid phone number" });
     }
-})
+
+    // 🔴 3. Check duplicate username
+    const checkUser = await User.findOne({ username });
+    if (checkUser) {
+      return res.status(409).json({ message: "Username already exists" });
+    }
+
+    // 🔴 4. Check duplicate email
+    const checkEmail = await User.findOne({ email });
+    if (checkEmail) {
+      return res.status(409).json({ message: "Email already exists" });
+    }
+
+    // 🔴 5. Check duplicate phone
+    const checkPhone = await User.findOne({ phone });
+    if (checkPhone) {
+      return res.status(409).json({ message: "Phone already registered" });
+    }
+
+    // ✅ 6. Create user (SAFE)
+    const newUser = new User({
+      username,
+      email,
+      password,
+      phone,
+      country,
+      city,
+      ipAddress: req.ip
+    });
+
+    const savedUser = await newUser.save();
+
+    // ✅ 7. Success response
+    res.status(201).json({
+      message: "Your Account Successfully Created",
+      user: savedUser
+    });
+
+    console.log(savedUser);
+
+  } catch (error) {
+    console.error("Signup Error:", error.message);
+
+    res.status(500).json({
+      message: "Internal Server Error"
+    });
+  }
+});
 
 
 router.post("/login", async (req, res) => {

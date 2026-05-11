@@ -1284,31 +1284,62 @@ router.get("/image/:id", async (req, res) => {
     // =========================
 
     let relatedPosts = await Post.aggregate([
-      {
-        $match: {
-          _id: { $ne: new mongoose.Types.ObjectId(id) },
-          ...tagFilter,
-          ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
-        },
-      },
+  {
+    $match: {
+      _id: { $ne: new mongoose.Types.ObjectId(id) },
+      ...tagFilter,
+      ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
+    },
+  },
 
-      // mix latest + randomness
-      {
-        $addFields: {
-          rand: { $rand: {} },
-        },
-      },
+  // 🔥 add multi-factor scoring (THIS is key)
+  {
+    $addFields: {
+      score: {
+        $add: [
+          // freshness boost (new posts preferred)
+          {
+            $multiply: [
+              1,
+              {
+                $divide: [
+                  1,
+                  {
+                    $add: [
+                      1,
+                      {
+                        $divide: [
+                          { $subtract: [new Date(), "$createdAt"] },
+                          1000 * 60 * 60 * 24, // days old
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
 
-      // prioritize latest first but still random
-      {
-        $sort: {
-          createdAt: -1,
-          rand: 1,
-        },
-      },
+          // trending boost if exists
+          { $ifNull: ["$trendingScore", 0] },
 
-      { $limit: 10 },
-    ]);
+          // randomness but controlled (IMPORTANT FIX)
+          { $multiply: [{ $rand: {} }, 2] },
+        ],
+      },
+    },
+  },
+
+  // 🔥 final sort = REAL hybrid ranking
+  {
+    $sort: {
+      score: -1,
+      createdAt: -1,
+    },
+  },
+
+  { $limit: 10 },
+]);
 
     // =========================
     // 2. FALLBACK → LATEST ANY POSTS (ALSO RANDOM)

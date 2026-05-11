@@ -1229,11 +1229,13 @@ router.get("/single/:id", async (req, res) => {
 // });
 
 
+
 router.get("/image/:id", async (req, res) => {
 
   function escapeRegex(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
   try {
     const { id } = req.params;
 
@@ -1269,60 +1271,73 @@ router.get("/image/:id", async (req, res) => {
       : [];
 
     const titleFilter =
-  titleKeywords.length > 0
-    ? {
-        $or: titleKeywords.map((word) => ({
-          title: { $regex: escapeRegex(word), $options: "i" },
-        })),
-      }
-    : {};
+      titleKeywords.length > 0
+        ? {
+            $or: titleKeywords.map((word) => ({
+              title: { $regex: escapeRegex(word), $options: "i" },
+            })),
+          }
+        : {};
 
     // =========================
-    // 1. PRIMARY RELATED POSTS
+    // 1. PRIMARY RELATED POSTS (FIXED FOR FRESH + NO REPEAT)
     // =========================
 
-    let relatedPosts = await Post.find({
-      _id: { $ne: id },
-      
-      ...tagFilter,
-      ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
-    })
-      .populate("userId", "username")
-      .sort({ trendingScore: -1, createdAt: -1 })
-      .limit(10)
-      .lean();
+    let relatedPosts = await Post.aggregate([
+      {
+        $match: {
+          _id: { $ne: new mongoose.Types.ObjectId(id) },
+          ...tagFilter,
+          ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
+        },
+      },
+
+      // mix latest + randomness
+      {
+        $addFields: {
+          rand: { $rand: {} },
+        },
+      },
+
+      // prioritize latest first but still random
+      {
+        $sort: {
+          createdAt: -1,
+          rand: 1,
+        },
+      },
+
+      { $limit: 10 },
+    ]);
 
     // =========================
-    // 2. FALLBACK → LATEST SAME TYPE
+    // 2. FALLBACK → LATEST ANY POSTS (ALSO RANDOM)
     // =========================
 
-    if (relatedPosts.length === 0) {
-      relatedPosts = await Post.find({
-        _id: { $ne: id }
-        
-      })
-        .populate("userId", "username")
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .lean();
+    if (!relatedPosts || relatedPosts.length === 0) {
+      relatedPosts = await Post.aggregate([
+        {
+          $match: {
+            _id: { $ne: new mongoose.Types.ObjectId(id) },
+          },
+        },
+        {
+          $addFields: {
+            rand: { $rand: {} },
+          },
+        },
+        {
+          $sort: {
+            createdAt: -1,
+            rand: 1,
+          },
+        },
+        { $limit: 10 },
+      ]);
     }
 
     // =========================
-    // 3. FINAL FALLBACK → ANY LATEST
-    // =========================
-
-    if (relatedPosts.length === 0) {
-      relatedPosts = await Post.find({
-        _id: { $ne: id },
-      })
-        .populate("userId", "username")
-        .sort({ createdAt: -1 })
-        .limit(10)
-        .lean();
-    }
-
-    // =========================
-    // REMOVE DUPLICATES
+    // REMOVE DUPLICATES SAFELY
     // =========================
 
     const uniqueRelated = Array.from(
@@ -1342,6 +1357,124 @@ router.get("/image/:id", async (req, res) => {
     });
   }
 });
+
+
+
+// router.get("/image/:id", async (req, res) => {
+
+//   function escapeRegex(text) {
+//   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// }
+//   try {
+//     const { id } = req.params;
+
+//     const selectedPost = await Post.findById(id)
+//       .populate("userId", "username profilePic")
+//       .populate({
+//         path: "comments.userId",
+//         select: "username profilePicture",
+//       })
+//       .populate({
+//         path: "comments.replies.userId",
+//         select: "username profilePicture",
+//       });
+
+//     if (!selectedPost) {
+//       return res.status(404).json({ message: "Post not found" });
+//     }
+
+//     // increase views
+//     Post.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec();
+
+//     const { tags = [], title } = selectedPost;
+
+//     // =========================
+//     // FILTER BUILD
+//     // =========================
+
+//     const tagFilter =
+//       tags.length > 0 ? { tags: { $in: tags } } : {};
+
+//     const titleKeywords = title
+//       ? title.split(" ").filter((w) => w.length > 2)
+//       : [];
+
+//     const titleFilter =
+//   titleKeywords.length > 0
+//     ? {
+//         $or: titleKeywords.map((word) => ({
+//           title: { $regex: escapeRegex(word), $options: "i" },
+//         })),
+//       }
+//     : {};
+
+//     // =========================
+//     // 1. PRIMARY RELATED POSTS
+//     // =========================
+
+//     let relatedPosts = await Post.find({
+//       _id: { $ne: id },
+      
+//       ...tagFilter,
+//       ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
+//     })
+//       .populate("userId", "username")
+//       .sort({ trendingScore: -1, createdAt: -1 })
+//       .limit(10)
+//       .lean();
+
+//     // =========================
+//     // 2. FALLBACK → LATEST SAME TYPE
+//     // =========================
+
+//     if (relatedPosts.length === 0) {
+//       relatedPosts = await Post.find({
+//         _id: { $ne: id }
+        
+//       })
+//         .populate("userId", "username")
+//         .sort({ createdAt: -1 })
+//         .limit(10)
+//         .lean();
+//     }
+
+//     // =========================
+//     // 3. FINAL FALLBACK → ANY LATEST
+//     // =========================
+
+//     if (relatedPosts.length === 0) {
+//       relatedPosts = await Post.find({
+//         _id: { $ne: id },
+//       })
+//         .populate("userId", "username")
+//         .sort({ createdAt: -1 })
+//         .limit(10)
+//         .lean();
+//     }
+
+//     // =========================
+//     // REMOVE DUPLICATES
+//     // =========================
+
+//     const uniqueRelated = Array.from(
+//       new Map(relatedPosts.map((p) => [p._id.toString(), p])).values()
+//     );
+
+//     return res.status(200).json({
+//       post: selectedPost,
+//       related: uniqueRelated,
+//     });
+
+//   } catch (error) {
+//     console.error("Error fetching post:", error);
+//     return res.status(500).json({
+//       message: "Server Error",
+//       error: error.message,
+//     });
+//   }
+// });
+
+
 
 
 router.get("/video/getall", async (req, res) => {

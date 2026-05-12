@@ -1292,12 +1292,31 @@ router.get("/image/:id", async (req, res) => {
     },
   },
 
-  // 🔥 add multi-factor scoring (THIS is key)
+  // 🔥 ADD VIDEO PRIORITY + FIX OLD POSTS
   {
     $addFields: {
+      isVideo: {
+        $cond: [
+          {
+            $or: [
+              { $eq: ["$mediaType", "video"] },
+              {
+                $regexMatch: {
+                  input: "$media",
+                  regex: /\.(mp4|webm|mov)$/i,
+                },
+              },
+            ],
+          },
+          1,
+          0,
+        ],
+      },
+
+      // 🔥 KEEP YOUR SCORE BUT IMPROVE "LATEST ONLY"
       score: {
         $add: [
-          // freshness boost (new posts preferred)
+          // your existing freshness logic
           {
             $multiply: [
               1,
@@ -1310,7 +1329,7 @@ router.get("/image/:id", async (req, res) => {
                       {
                         $divide: [
                           { $subtract: [new Date(), "$createdAt"] },
-                          1000 * 60 * 60 * 24, // days old
+                          1000 * 60 * 60 * 24,
                         ],
                       },
                     ],
@@ -1320,25 +1339,26 @@ router.get("/image/:id", async (req, res) => {
             ],
           },
 
-          // trending boost if exists
           { $ifNull: ["$trendingScore", 0] },
 
-          // randomness but controlled (IMPORTANT FIX)
-          { $multiply: [{ $rand: {} }, 2] },
+          // 🔥 reduce randomness so OLD posts don't dominate
+          { $multiply: [{ $rand: {} }, 0.5] },
         ],
       },
     },
   },
 
-  // 🔥 final sort = REAL hybrid ranking
+  // 🔥 NEW SORTING LOGIC (VIDEO FIRST + LATEST FIRST)
   {
     $sort: {
-      score: -1,
-      createdAt: -1,
+      isVideo: -1,     // videos first
+      score: -1,       // relevance
+      createdAt: -1,   // latest priority
     },
   },
 
-  { $limit: 10 },
+  // 🔥 INCREASE LIMIT (you asked ~20)
+  { $limit: 20 },
 ]);
 
     // =========================

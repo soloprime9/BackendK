@@ -30,6 +30,28 @@ const client = new Client()
 const storage = new Storage(client);
 const BUCKET_ID = "685fc9880036ec074baf";
 
+app.post("/number/sync-contacts", (req, res) => {
+  console.log("==================================");
+  console.log("📩 CONTACT SYNC REQUEST RECEIVED");
+  console.log("==================================");
+
+  console.log("RAW BODY:", req.body);
+
+  if (req.body.contacts) {
+    console.log("CONTACTS ARRAY:");
+    console.table(req.body.contacts);
+  } else {
+    console.log("❌ No contacts received");
+  }
+
+  console.log("==================================");
+
+  return res.json({
+    success: true,
+    message: "Data received successfully",
+    receivedData: req.body
+  });
+});
 
 
 router.get("/all-slugs", async (req, res) => {

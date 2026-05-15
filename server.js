@@ -11,7 +11,7 @@ const User = require("./routers/User");
 const Search = require("./routers/autoai");
 const Demo = require("./routers/demo");
 const analyticsRoutes = require("./routers/analytics");
-const pwaAnalyticsRoute = require("./routes/pwaAnalytics");
+const pwaAnalyticsRoute = require("./routers/pwaAnalytics");
 
 const app = express();
 const server = http.createServer(app);

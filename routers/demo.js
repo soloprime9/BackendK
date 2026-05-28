@@ -156,7 +156,7 @@ router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
     thumbnailUrl = mediaUrl;
   }
 
-  duration = await getVideoDurationSeconds(tempFilePath);
+  // duration = await getVideoDurationSeconds(tempFilePath);
 }
     // Handle image
     else if (mediaType.startsWith("image")) {

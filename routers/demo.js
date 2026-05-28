@@ -199,7 +199,16 @@ while (existing) {
     log("✅ Post saved successfully:", savedPost._id);
 
     // Cleanup uploaded file
-    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+    finally {
+  try {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+      log("🧹 Temp file cleaned");
+    }
+  } catch (e) {
+    errLog("Cleanup failed:", e);
+  }
+}
 
     // Response
     res.status(200).json({

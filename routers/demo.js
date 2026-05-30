@@ -1,26 +1,22 @@
 const express = require("express");
 const router = express.Router();
-const multer = require("multer");
-const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { v4: uuidv4 } = require("uuid");
 const dotenv = require("dotenv");
-const fs = require("fs");
 const path = require("path");
-const os = require("os");
 const Post = require("../models/Post");
 const verifyToken = require("../middleware/verifyToken");
-const generateThumbnail = require("../utils/generateThumbnail");
 
 dotenv.config();
-ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Debug helpers
-const log = (...args) => console.log("🟩 [DEBUG]", ...args);
-const errLog = (...args) => console.error("❌ [ERROR]", ...args);
+// ─── Logging helpers ───────────────────────────────────────────────
+const log = (...args) => console.log("🟩 [UPLOAD]", ...args);
+const err = (...args) => console.error("❌ [ERROR]", ...args);
 
-// Cloudflare R2 client
-const r2Client = new S3Client({
+// ─── R2 Client ─────────────────────────────────────────────────────
+// NO multer, NO ffmpeg, NO file bytes ever touch this server
+const r2 = new S3Client({
   region: "auto",
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   credentials: {
@@ -29,199 +25,257 @@ const r2Client = new S3Client({
   },
 });
 
-const BUCKET_NAME = process.env.R2_BUCKET_NAME;
-const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
+const BUCKET = process.env.R2_BUCKET_NAME;
+const BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 
-// Multer disk storage (to handle large files safely)
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, os.tmpdir());
-    },
-    filename: (req, file, cb) => {
-      const timestamp = Date.now();
-      const ext = path.extname(file.originalname);
-      cb(null, `${timestamp}${ext}`);
-    },
-  }),
-});
+// ─── Allowed types ──────────────────────────────────────────────────
+const ALLOWED_VIDEO = ["video/mp4", "video/webm", "video/ogg", "video/quicktime"];
+const ALLOWED_IMAGE = [
+  "image/png", "image/jpeg", "image/jpg", "image/webp",
+  "image/gif", "image/bmp", "image/svg+xml",
+];
+const ALL_ALLOWED = [...ALLOWED_VIDEO, ...ALLOWED_IMAGE];
 
-// Get video duration in seconds
-function getVideoDurationSeconds(filePath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) return reject(err);
-      const totalSeconds = Math.floor(metadata.format.duration || 0);
-      resolve(totalSeconds);
-    });
-  });
+// Max sizes: 200MB video, 20MB image
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+// ─── Slug generator ────────────────────────────────────────────────
+function generateSlug(title) {
+  if (!title) return "post";
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 6)
+    .join("-");
 }
 
-// Convert seconds → ISO 8601 (optional for frontend)
+// ─── Duration formatter ────────────────────────────────────────────
 function secondsToISO(seconds) {
+  if (!seconds) return "PT0S";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `PT${h ? h + "H" : ""}${m ? m + "M" : ""}${s}S`;
 }
 
-
-function generateSlug(title) {
-  if (!title) return "post";
-
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")   // remove special chars
-    .trim()
-    .split(/\s+/)                  // split into words
-    .slice(0, 6)                  // ✅ keep only first 5–6 words
-    .join("-");                   // join with dash
-}
-
-
-// Test route
+// ─── Check route ───────────────────────────────────────────────────
 router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
 
-// Upload route
-router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
-  const { file } = req;
-  const userId = req.user.UserId;
-  const { title, tags, category } = req.body;
-
-  if (!file) {
-    errLog("No file uploaded!");
-    return res.status(400).json({ error: "No file uploaded" });
-  }
-
-  log("Upload started for:", file.originalname);
-  log("Media type:", file.mimetype);
-
+// ─────────────────────────────────────────────────────────────────────
+// STEP 1 — Frontend asks for presigned URLs (for video + thumbnail)
+// This route finishes in under 200ms — no timeout possible on Render
+// ─────────────────────────────────────────────────────────────────────
+router.post("/presign", verifyToken, async (req, res) => {
   try {
-    const timestamp = Date.now();
-    const mediaType = file.mimetype;
-    const tempFilePath = file.path; // disk path from multer
-    const ext = path.extname(file.originalname);
-    const safeFileKey = `${timestamp}${ext}`;
+    const { video, thumbnail } = req.body;
+    // video: { filename, contentType, fileSize }
+    // thumbnail: { contentType, fileSize }  — always image/jpeg from browser canvas
 
-    // Step 1: Upload to R2 using stream
-    log("Uploading file to R2...");
-    const fileStream = fs.createReadStream(tempFilePath);
-    await r2Client.send(
-      new PutObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: safeFileKey,
-        Body: fileStream,
-        ContentType: mediaType,
-      })
-    );
-    log("✅ File uploaded to R2:", safeFileKey);
-    const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
-
-    let thumbnailUrl = "";
-    let duration = 0;
-
-    // Step 2: Handle video
-    
-    if (mediaType.startsWith("video")) {
-  log("Generating HD thumbnail...");
-
-  const thumbFileName = `thumb-${timestamp}.jpg`;
-
-  let generatedPath = null;
-
-  try {
-    generatedPath = await generateThumbnail(tempFilePath, thumbFileName);
-  } catch (e) {
-    errLog("Thumbnail error:", e);
-  }
-
-  if (generatedPath && fs.existsSync(generatedPath)) {
-    const thumbStream = fs.createReadStream(generatedPath);
-
-    await r2Client.send(
-      new PutObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: thumbFileName,
-        Body: thumbStream,
-        ContentType: "image/png",
-      })
-    );
-
-    thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
-    fs.unlinkSync(generatedPath);
-
-    log("✅ Thumbnail uploaded to R2:", thumbFileName);
-  } else {
-    log("⚠️ Thumbnail missing, using video fallback.");
-    thumbnailUrl = mediaUrl;
-  }
-
-  // duration = await getVideoDurationSeconds(tempFilePath);
-}
-    // Handle image
-    else if (mediaType.startsWith("image")) {
-      thumbnailUrl = mediaUrl;
-    } else {
-      errLog("Unsupported file type:", mediaType);
-      fs.unlinkSync(tempFilePath);
-      return res.status(400).json({ error: "Unsupported file type" });
+    // ── Validate video ──
+    if (!video || !ALLOWED_VIDEO.includes(video.contentType)) {
+      return res.status(400).json({ error: "Invalid video type. Allowed: mp4, webm, ogg, quicktime" });
+    }
+    if (video.fileSize > MAX_VIDEO_BYTES) {
+      return res.status(400).json({ error: "Video too large. Max 200MB." });
     }
 
+    // ── Validate thumbnail ──
+    if (!thumbnail || !ALLOWED_IMAGE.includes(thumbnail.contentType)) {
+      return res.status(400).json({ error: "Invalid thumbnail type" });
+    }
+    if (thumbnail.fileSize > MAX_IMAGE_BYTES) {
+      return res.status(400).json({ error: "Thumbnail too large" });
+    }
+
+    const id = uuidv4();
+    const videoExt = path.extname(video.filename) || ".mp4";
+    const videoKey = `videos/${id}${videoExt}`;
+    const thumbKey = `thumbnails/${id}.jpg`;
+
+    log("Generating presigned URLs for:", video.filename);
+
+    // Generate both signed URLs in parallel — fast
+    const [videoSignedUrl, thumbSignedUrl] = await Promise.all([
+      getSignedUrl(
+        r2,
+        new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: videoKey,
+          ContentType: video.contentType,
+        }),
+        { expiresIn: 900 } // 15 min — enough for any upload
+      ),
+      getSignedUrl(
+        r2,
+        new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: thumbKey,
+          ContentType: "image/jpeg",
+        }),
+        { expiresIn: 900 }
+      ),
+    ]);
+
+    log("✅ Presigned URLs generated for id:", id);
+
+    res.json({
+      videoUpload: {
+        url: videoSignedUrl,
+        key: videoKey,
+        publicUrl: `${BASE_URL}/${videoKey}`,
+      },
+      thumbUpload: {
+        url: thumbSignedUrl,
+        key: thumbKey,
+        publicUrl: `${BASE_URL}/${thumbKey}`,
+      },
+    });
+  } catch (e) {
+    err("Presign failed:", e);
+    res.status(500).json({ error: "Could not generate upload URLs" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// STEP 1B — Image-only presign (no thumbnail needed, image IS the media)
+// ─────────────────────────────────────────────────────────────────────
+router.post("/presign-image", verifyToken, async (req, res) => {
+  try {
+    const { contentType, fileSize, filename } = req.body;
+
+    if (!ALLOWED_IMAGE.includes(contentType)) {
+      return res.status(400).json({ error: "Invalid image type" });
+    }
+    if (fileSize > MAX_IMAGE_BYTES) {
+      return res.status(400).json({ error: "Image too large. Max 20MB." });
+    }
+
+    const id = uuidv4();
+    const ext = path.extname(filename) || ".jpg";
+    const imageKey = `images/${id}${ext}`;
+
+    const signedUrl = await getSignedUrl(
+      r2,
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: imageKey,
+        ContentType: contentType,
+      }),
+      { expiresIn: 300 }
+    );
+
+    res.json({
+      url: signedUrl,
+      key: imageKey,
+      publicUrl: `${BASE_URL}/${imageKey}`,
+    });
+  } catch (e) {
+    err("Image presign failed:", e);
+    res.status(500).json({ error: "Could not generate image upload URL" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// STEP 2 — Frontend calls this AFTER uploading directly to R2
+// Just saves metadata to MongoDB — finishes in under 300ms
+// ─────────────────────────────────────────────────────────────────────
+router.post("/confirm", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.UserId;
+    const {
+      title,
+      category,
+      tags,
+      // video fields
+      videoKey,
+      videoUrl,
+      thumbnailKey,
+      thumbnailUrl,
+      mediaType,
+      fileSize,
+      duration,      // in seconds, extracted by browser
+      resolution,    // e.g. "1920x1080", extracted by browser
+      // image fields (if image upload)
+      imageKey,
+      imageUrl,
+    } = req.body;
+
+    if (!title) return res.status(400).json({ error: "Title is required" });
+
+    const isVideo = mediaType && mediaType.startsWith("video");
+    const isImage = mediaType && mediaType.startsWith("image");
+
+    if (!isVideo && !isImage) {
+      return res.status(400).json({ error: "Invalid media type" });
+    }
+
+    // Build slug (unique)
     let slug = generateSlug(title);
+    let existing = await Post.findOne({ slug });
+    let count = 1;
+    while (existing) {
+      slug = `${generateSlug(title)}-${count++}`;
+      existing = await Post.findOne({ slug });
+    }
 
-// check duplicate
-let existing = await Post.findOne({ slug });
-let count = 1;
+    const extractedTags = Array.isArray(tags)
+      ? tags
+      : tags
+      ? tags.split(",").map((t) => t.trim()).filter(Boolean)
+      : [];
 
-while (existing) {
-  slug = `${generateSlug(title)}-${count}`;
-  existing = await Post.findOne({ slug });
-  count++;
-}
-    
-    // Step 3: Save post in MongoDB
-    log("Saving post in MongoDB...");
+    // Pull hashtags out of title too
+    const titleTags = (title.match(/#\w+/g) || []).map((t) => t.replace("#", ""));
+    const allTags = [...new Set([...extractedTags, ...titleTags])];
+
+    const mediaUrl = isVideo ? videoUrl : imageUrl;
+    const thumbUrl = isVideo ? thumbnailUrl : (imageUrl || "");
+
     const newPost = new Post({
       userId,
       title,
-      slug, // ✅ NEW
-      category: category || "Entertainment", // ✅ NEW
-      tags: tags ? tags.split(",").map((t) => t.trim()) : [],
+      slug,
+      category: category || "Entertainment",
+      tags: allTags,
       media: mediaUrl,
-      thumbnail: thumbnailUrl,
+      thumbnail: thumbUrl,
       mediaType,
-      duration, // numeric seconds only
+      fileSize: fileSize || 0,
+      duration: duration || 0,
+      resolution: resolution || "",
+      durationISO: secondsToISO(duration || 0),
       likes: [],
       comments: [],
     });
 
-    const savedPost = await newPost.save();
-    log("✅ Post saved successfully:", savedPost._id);
+    const saved = await newPost.save();
+    log("✅ Post saved:", saved._id);
 
-    // Cleanup uploaded file
-    
-    if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
-
-    // Response
     res.status(200).json({
       success: true,
-      post: savedPost,
+      post: saved,
       mediaUrl,
-      thumbnailUrl,
-      duration,
-      durationISO: secondsToISO(duration), // optional frontend/Google
+      thumbnailUrl: thumbUrl,
+      duration: duration || 0,
+      durationISO: secondsToISO(duration || 0),
     });
-
-    log("✅ Upload completed successfully for:", file.originalname);
-  } catch (error) {
-    errLog("❌ Upload failed:", error);
-    res.status(500).json({ error: error.message || "Upload failed" });
+  } catch (e) {
+    err("Confirm failed:", e);
+    res.status(500).json({ error: e.message || "Could not save post" });
   }
 });
 
-// Global crash logger
-process.on("unhandledRejection", (reason) => errLog("💥 Unhandled Rejection:", reason));
-process.on("uncaughtException", (error) => errLog("💥 Uncaught Exception:", error));
+// ─── Keep old /upload route returning a clear message ──────────────
+// So if anything still calls it, you know exactly what happened
+router.post("/upload", (req, res) => {
+  res.status(410).json({
+    error: "This endpoint is deprecated. Use /presign + /confirm instead.",
+    docs: "POST /demo/presign → upload to R2 → POST /demo/confirm",
+  });
+});
 
 module.exports = router;
 
@@ -232,6 +286,9 @@ module.exports = router;
 
 
 
+
+
+
 // const express = require("express");
 // const router = express.Router();
 // const multer = require("multer");
@@ -241,8 +298,10 @@ module.exports = router;
 // const dotenv = require("dotenv");
 // const fs = require("fs");
 // const path = require("path");
+// const os = require("os");
 // const Post = require("../models/Post");
 // const verifyToken = require("../middleware/verifyToken");
+// const generateThumbnail = require("../utils/generateThumbnail");
 
 // dotenv.config();
 // ffmpeg.setFfmpegPath(ffmpegPath);
@@ -251,7 +310,7 @@ module.exports = router;
 // const log = (...args) => console.log("🟩 [DEBUG]", ...args);
 // const errLog = (...args) => console.error("❌ [ERROR]", ...args);
 
-// // Cloudflare R2 Client
+// // Cloudflare R2 client
 // const r2Client = new S3Client({
 //   region: "auto",
 //   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -264,19 +323,22 @@ module.exports = router;
 // const BUCKET_NAME = process.env.R2_BUCKET_NAME;
 // const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 
-// // Multer in-memory
-// const upload = multer({ storage: multer.memoryStorage() });
-
-// // Convert seconds → ISO 8601
-// function secondsToISO(seconds) {
-//   const h = Math.floor(seconds / 3600);
-//   const m = Math.floor((seconds % 3600) / 60);
-//   const s = seconds % 60;
-//   return `PT${h ? h + "H" : ""}${m ? m + "M" : ""}${s}S`;
-// }
+// // Multer disk storage (to handle large files safely)
+// const upload = multer({
+//   storage: multer.diskStorage({
+//     destination: (req, file, cb) => {
+//       cb(null, os.tmpdir());
+//     },
+//     filename: (req, file, cb) => {
+//       const timestamp = Date.now();
+//       const ext = path.extname(file.originalname);
+//       cb(null, `${timestamp}${ext}`);
+//     },
+//   }),
+// });
 
 // // Get video duration in seconds
-// function getVideoDurationInSeconds(filePath) {
+// function getVideoDurationSeconds(filePath) {
 //   return new Promise((resolve, reject) => {
 //     ffmpeg.ffprobe(filePath, (err, metadata) => {
 //       if (err) return reject(err);
@@ -286,205 +348,36 @@ module.exports = router;
 //   });
 // }
 
+// // Convert seconds → ISO 8601 (optional for frontend)
+// function secondsToISO(seconds) {
+//   const h = Math.floor(seconds / 3600);
+//   const m = Math.floor((seconds % 3600) / 60);
+//   const s = seconds % 60;
+//   return `PT${h ? h + "H" : ""}${m ? m + "M" : ""}${s}S`;
+// }
+
+
+// function generateSlug(title) {
+//   if (!title) return "post";
+
+//   return title
+//     .toLowerCase()
+//     .replace(/[^a-z0-9\s]/g, "")   // remove special chars
+//     .trim()
+//     .split(/\s+/)                  // split into words
+//     .slice(0, 6)                  // ✅ keep only first 5–6 words
+//     .join("-");                   // join with dash
+// }
+
+
+// // Test route
+// router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
+
 // // Upload route
 // router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
 //   const { file } = req;
 //   const userId = req.user.UserId;
-//   const { title, tags } = req.body;
-
-//   if (!file) return res.status(400).json({ error: "No file uploaded" });
-
-//   log("Upload started for:", file.originalname);
-//   log("Media type:", file.mimetype);
-
-//   try {
-//     const timestamp = Date.now();
-//     const ext = path.extname(file.originalname);
-//     const safeFileKey = `${timestamp}${ext}`;
-//     const mediaType = file.mimetype;
-
-//     // Step 1: Upload video/image to R2
-//     await r2Client.send(
-//       new PutObjectCommand({
-//         Bucket: BUCKET_NAME,
-//         Key: safeFileKey,
-//         Body: file.buffer,
-//         ContentType: mediaType,
-//       })
-//     );
-//     log("✅ File uploaded to R2:", safeFileKey);
-
-//     const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
-//     let thumbnailUrl = mediaUrl; // default for images
-//     let durationSeconds = 0;
-
-//     // Step 2: Handle video
-//     if (mediaType.startsWith("video")) {
-//       const tempVideoPath = `/tmp/${timestamp}${ext}`;
-//       const thumbFileName = `thumb-${timestamp}.png`;
-//       const thumbPath = `/tmp/${thumbFileName}`;
-//       fs.writeFileSync(tempVideoPath, file.buffer);
-
-//       try {
-//         // Generate high-quality thumbnail safely
-//         await new Promise((resolve) => {
-//           ffmpeg(tempVideoPath)
-//             .screenshots({
-//               timestamps: ["00:00:01.000", "00:00:00.000"], // fallback
-//               filename: thumbFileName,
-//               folder: "/tmp",
-//               size: "1280x720", // HD 16:9
-//             })
-//             .on("end", resolve)
-//             .on("error", (err) => {
-//               errLog("⚠️ Thumbnail generation failed:", err);
-//               resolve(); // continue anyway
-//             });
-//         });
-
-//         // Upload thumbnail if exists
-//         if (fs.existsSync(thumbPath)) {
-//           const thumbBuffer = fs.readFileSync(thumbPath);
-//           await r2Client.send(
-//             new PutObjectCommand({
-//               Bucket: BUCKET_NAME,
-//               Key: thumbFileName,
-//               Body: thumbBuffer,
-//               ContentType: "image/png",
-//             })
-//           );
-//           thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
-//           fs.unlinkSync(thumbPath); // cleanup
-//         } else {
-//           log("⚠️ Thumbnail missing, using video URL as fallback");
-//         }
-
-//         // Duration
-//         durationSeconds = await getVideoDurationInSeconds(tempVideoPath);
-//       } catch (err) {
-//         errLog("❌ Video processing error:", err);
-//         thumbnailUrl = mediaUrl;
-//         durationSeconds = 0;
-//       } finally {
-//         if (fs.existsSync(tempVideoPath)) fs.unlinkSync(tempVideoPath); // cleanup temp video
-//       }
-//     }
-
-//     // Step 3: Save post in MongoDB
-//     const newPost = new Post({
-//       userId,
-//       title,
-//       tags: tags ? tags.split(",").map((t) => t.trim()) : [],
-//       media: mediaUrl,
-//       thumbnail: thumbnailUrl,
-//       mediaType,
-//       duration: durationSeconds, // store as number
-//       likes: [],
-//       comments: [],
-//     });
-
-//     const savedPost = await newPost.save();
-
-//     res.status(200).json({
-//       success: true,
-//       post: savedPost,
-//       mediaUrl,
-//       thumbnailUrl,
-//       duration: durationSeconds,
-//       durationISO: secondsToISO(durationSeconds), // frontend/Google-ready
-//     });
-
-//     log("✅ Upload completed successfully for:", file.originalname);
-//   } catch (error) {
-//     errLog("❌ Upload failed:", error);
-//     res.status(500).json({ error: error.message || "Upload failed" });
-//   }
-// });
-
-// // Optional check route
-// router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
-
-// module.exports = router;
-
-
-
-
-
-
-
-
-
-// const express = require("express");
-// const router = express.Router();
-// const multer = require("multer");
-// const ffmpeg = require("fluent-ffmpeg");
-// const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-// const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-// const dotenv = require("dotenv");
-// const fs = require("fs");
-// const path = require("path");
-// const Post = require("../models/Post");
-// const verifyToken = require("../middleware/verifyToken");
-
-// dotenv.config();
-// ffmpeg.setFfmpegPath(ffmpegPath);
-
-// // 🟩 Debug Log Helper
-// const log = (...args) => console.log("🟩 [DEBUG]", ...args);
-// const errLog = (...args) => console.error("❌ [ERROR]", ...args);
-
-// // ✅ Cloudflare R2 (AWS SDK v3)
-// const r2Client = new S3Client({
-//   region: "auto",
-//   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-//   credentials: {
-//     accessKeyId: process.env.R2_ACCESS_KEY_ID,
-//     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-//   },
-// });
-
-// const BUCKET_NAME = process.env.R2_BUCKET_NAME;
-// const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
-
-
-// // 🎬 Convert video duration → ISO 8601 format (Google-friendly)
-// function getVideoDurationISO(filePath) {
-//   return new Promise((resolve, reject) => {
-//     ffmpeg.ffprobe(filePath, (err, metadata) => {
-//       if (err) return reject(err);
-
-//       const totalSeconds = Math.floor(metadata.format.duration);
-
-//       const hours = Math.floor(totalSeconds / 3600);
-//       const minutes = Math.floor((totalSeconds % 3600) / 60);
-//       const seconds = totalSeconds % 60;
-
-//       const iso =
-//         "PT" +
-//         (hours > 0 ? `${hours}H` : "") +
-//         (minutes > 0 ? `${minutes}M` : "") +
-//         (seconds > 0 ? `${seconds}S` : "");
-
-//       resolve(iso);
-//     });
-//   });
-// }
-
-
-
-// // ✅ Multer (in-memory)
-// const upload = multer({ storage: multer.memoryStorage() });
-
-
-// router.get("/check", (req, res) => {
-//   res.json({ message: "Access granted!", user: req.user });
-// });
-
-// // ✅ UPLOAD ROUTE WITH DEBUGGING
-// router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
-//   const { file } = req;
-//   const userId = req.user.UserId;
-//   const { title, tags } = req.body;
+//   const { title, tags, category } = req.body;
 
 //   if (!file) {
 //     errLog("No file uploaded!");
@@ -496,89 +389,99 @@ module.exports = router;
 
 //   try {
 //     const timestamp = Date.now();
+//     const mediaType = file.mimetype;
+//     const tempFilePath = file.path; // disk path from multer
 //     const ext = path.extname(file.originalname);
 //     const safeFileKey = `${timestamp}${ext}`;
-//     const mediaType = file.mimetype;
 
-//     // ✅ Step 1: Upload to R2
+//     // Step 1: Upload to R2 using stream
 //     log("Uploading file to R2...");
+//     const fileStream = fs.createReadStream(tempFilePath);
 //     await r2Client.send(
 //       new PutObjectCommand({
 //         Bucket: BUCKET_NAME,
 //         Key: safeFileKey,
-//         Body: file.buffer,
+//         Body: fileStream,
 //         ContentType: mediaType,
 //       })
 //     );
 //     log("✅ File uploaded to R2:", safeFileKey);
-
 //     const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
+
 //     let thumbnailUrl = "";
-//     let durationISO = null; // ⭐ will store video duration
+//     let duration = 0;
 
-
-//     // ✅ Step 2: Generate Thumbnail for Video
+//     // Step 2: Handle video
+    
 //     if (mediaType.startsWith("video")) {
-//       log("Generating video thumbnail...");
-//       const tempVideoPath = `/tmp/${timestamp}${ext}`;
-//       const thumbFileName = `thumb-${timestamp}.png`;
-//       const thumbPath = `/tmp/${thumbFileName}`;
+//   log("Generating HD thumbnail...");
 
-//       fs.writeFileSync(tempVideoPath, file.buffer);
-//       log("Temp video file written:", tempVideoPath);
+//   const thumbFileName = `thumb-${timestamp}.jpg`;
 
-//       await new Promise((resolve, reject) => {
-//         ffmpeg(tempVideoPath)
-//           .screenshots({
-//             timestamps: ["00:00:01.000"],
-//             filename: thumbFileName,
-//             folder: "/tmp",
-//             size: "320x240",
-//           })
-//           .on("end", () => {
-//             log("✅ Thumbnail generated:", thumbFileName);
-//             resolve();
-//           })
-//           .on("error", (error) => {
-//             errLog("❌ Thumbnail generation failed:", error);
-//             reject(error);
-//           });
-//       });
+//   let generatedPath = null;
 
-//       const thumbBuffer = fs.readFileSync(thumbPath);
-//       await r2Client.send(
-//         new PutObjectCommand({
-//           Bucket: BUCKET_NAME,
-//           Key: thumbFileName,
-//           Body: thumbBuffer,
-//           ContentType: "image/png",
-//         })
-//       );
-//       log("✅ Thumbnail uploaded to R2:", thumbFileName);
-//       thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
-      
-//       durationISO = await getVideoDurationISO(tempVideoPath);
-//       log("🎬 ISO Duration:", durationISO);
+//   try {
+//     generatedPath = await generateThumbnail(tempFilePath, thumbFileName);
+//   } catch (e) {
+//     errLog("Thumbnail error:", e);
+//   }
 
-      
-//     } else if (mediaType.startsWith("image")) {
-//       log("Image upload detected — no thumbnail generation needed.");
+//   if (generatedPath && fs.existsSync(generatedPath)) {
+//     const thumbStream = fs.createReadStream(generatedPath);
+
+//     await r2Client.send(
+//       new PutObjectCommand({
+//         Bucket: BUCKET_NAME,
+//         Key: thumbFileName,
+//         Body: thumbStream,
+//         ContentType: "image/png",
+//       })
+//     );
+
+//     thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
+//     fs.unlinkSync(generatedPath);
+
+//     log("✅ Thumbnail uploaded to R2:", thumbFileName);
+//   } else {
+//     log("⚠️ Thumbnail missing, using video fallback.");
+//     thumbnailUrl = mediaUrl;
+//   }
+
+//   // duration = await getVideoDurationSeconds(tempFilePath);
+// }
+//     // Handle image
+//     else if (mediaType.startsWith("image")) {
 //       thumbnailUrl = mediaUrl;
 //     } else {
 //       errLog("Unsupported file type:", mediaType);
+//       fs.unlinkSync(tempFilePath);
 //       return res.status(400).json({ error: "Unsupported file type" });
 //     }
 
-//     // ✅ Step 3: Save Post in MongoDB
+//     let slug = generateSlug(title);
+
+// // check duplicate
+// let existing = await Post.findOne({ slug });
+// let count = 1;
+
+// while (existing) {
+//   slug = `${generateSlug(title)}-${count}`;
+//   existing = await Post.findOne({ slug });
+//   count++;
+// }
+    
+//     // Step 3: Save post in MongoDB
 //     log("Saving post in MongoDB...");
 //     const newPost = new Post({
 //       userId,
 //       title,
+//       slug, // ✅ NEW
+//       category: category || "Entertainment", // ✅ NEW
 //       tags: tags ? tags.split(",").map((t) => t.trim()) : [],
 //       media: mediaUrl,
 //       thumbnail: thumbnailUrl,
 //       mediaType,
-//       duration: durationISO,
+//       duration, // numeric seconds only
 //       likes: [],
 //       comments: [],
 //     });
@@ -586,31 +489,419 @@ module.exports = router;
 //     const savedPost = await newPost.save();
 //     log("✅ Post saved successfully:", savedPost._id);
 
+//     // Cleanup uploaded file
+    
+//     if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+
+//     // Response
 //     res.status(200).json({
 //       success: true,
 //       post: savedPost,
 //       mediaUrl,
 //       thumbnailUrl,
-//       duration: durationISO,
+//       duration,
+//       durationISO: secondsToISO(duration), // optional frontend/Google
 //     });
 
 //     log("✅ Upload completed successfully for:", file.originalname);
 //   } catch (error) {
-//     errLog("Upload failed:", error);
+//     errLog("❌ Upload failed:", error);
 //     res.status(500).json({ error: error.message || "Upload failed" });
 //   }
 // });
 
-// // ✅ Global crash logger (for Render/Vercel)
-// process.on("unhandledRejection", (reason) => {
-//   errLog("💥 Unhandled Rejection:", reason);
-// });
-
-// process.on("uncaughtException", (error) => {
-//   errLog("💥 Uncaught Exception:", error);
-// });
+// // Global crash logger
+// process.on("unhandledRejection", (reason) => errLog("💥 Unhandled Rejection:", reason));
+// process.on("uncaughtException", (error) => errLog("💥 Uncaught Exception:", error));
 
 // module.exports = router;
+
+
+
+
+
+
+
+
+// // const express = require("express");
+// // const router = express.Router();
+// // const multer = require("multer");
+// // const ffmpeg = require("fluent-ffmpeg");
+// // const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+// // const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+// // const dotenv = require("dotenv");
+// // const fs = require("fs");
+// // const path = require("path");
+// // const Post = require("../models/Post");
+// // const verifyToken = require("../middleware/verifyToken");
+
+// // dotenv.config();
+// // ffmpeg.setFfmpegPath(ffmpegPath);
+
+// // // Debug helpers
+// // const log = (...args) => console.log("🟩 [DEBUG]", ...args);
+// // const errLog = (...args) => console.error("❌ [ERROR]", ...args);
+
+// // // Cloudflare R2 Client
+// // const r2Client = new S3Client({
+// //   region: "auto",
+// //   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+// //   credentials: {
+// //     accessKeyId: process.env.R2_ACCESS_KEY_ID,
+// //     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+// //   },
+// // });
+
+// // const BUCKET_NAME = process.env.R2_BUCKET_NAME;
+// // const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
+
+// // // Multer in-memory
+// // const upload = multer({ storage: multer.memoryStorage() });
+
+// // // Convert seconds → ISO 8601
+// // function secondsToISO(seconds) {
+// //   const h = Math.floor(seconds / 3600);
+// //   const m = Math.floor((seconds % 3600) / 60);
+// //   const s = seconds % 60;
+// //   return `PT${h ? h + "H" : ""}${m ? m + "M" : ""}${s}S`;
+// // }
+
+// // // Get video duration in seconds
+// // function getVideoDurationInSeconds(filePath) {
+// //   return new Promise((resolve, reject) => {
+// //     ffmpeg.ffprobe(filePath, (err, metadata) => {
+// //       if (err) return reject(err);
+// //       const totalSeconds = Math.floor(metadata.format.duration || 0);
+// //       resolve(totalSeconds);
+// //     });
+// //   });
+// // }
+
+// // // Upload route
+// // router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
+// //   const { file } = req;
+// //   const userId = req.user.UserId;
+// //   const { title, tags } = req.body;
+
+// //   if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+// //   log("Upload started for:", file.originalname);
+// //   log("Media type:", file.mimetype);
+
+// //   try {
+// //     const timestamp = Date.now();
+// //     const ext = path.extname(file.originalname);
+// //     const safeFileKey = `${timestamp}${ext}`;
+// //     const mediaType = file.mimetype;
+
+// //     // Step 1: Upload video/image to R2
+// //     await r2Client.send(
+// //       new PutObjectCommand({
+// //         Bucket: BUCKET_NAME,
+// //         Key: safeFileKey,
+// //         Body: file.buffer,
+// //         ContentType: mediaType,
+// //       })
+// //     );
+// //     log("✅ File uploaded to R2:", safeFileKey);
+
+// //     const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
+// //     let thumbnailUrl = mediaUrl; // default for images
+// //     let durationSeconds = 0;
+
+// //     // Step 2: Handle video
+// //     if (mediaType.startsWith("video")) {
+// //       const tempVideoPath = `/tmp/${timestamp}${ext}`;
+// //       const thumbFileName = `thumb-${timestamp}.png`;
+// //       const thumbPath = `/tmp/${thumbFileName}`;
+// //       fs.writeFileSync(tempVideoPath, file.buffer);
+
+// //       try {
+// //         // Generate high-quality thumbnail safely
+// //         await new Promise((resolve) => {
+// //           ffmpeg(tempVideoPath)
+// //             .screenshots({
+// //               timestamps: ["00:00:01.000", "00:00:00.000"], // fallback
+// //               filename: thumbFileName,
+// //               folder: "/tmp",
+// //               size: "1280x720", // HD 16:9
+// //             })
+// //             .on("end", resolve)
+// //             .on("error", (err) => {
+// //               errLog("⚠️ Thumbnail generation failed:", err);
+// //               resolve(); // continue anyway
+// //             });
+// //         });
+
+// //         // Upload thumbnail if exists
+// //         if (fs.existsSync(thumbPath)) {
+// //           const thumbBuffer = fs.readFileSync(thumbPath);
+// //           await r2Client.send(
+// //             new PutObjectCommand({
+// //               Bucket: BUCKET_NAME,
+// //               Key: thumbFileName,
+// //               Body: thumbBuffer,
+// //               ContentType: "image/png",
+// //             })
+// //           );
+// //           thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
+// //           fs.unlinkSync(thumbPath); // cleanup
+// //         } else {
+// //           log("⚠️ Thumbnail missing, using video URL as fallback");
+// //         }
+
+// //         // Duration
+// //         durationSeconds = await getVideoDurationInSeconds(tempVideoPath);
+// //       } catch (err) {
+// //         errLog("❌ Video processing error:", err);
+// //         thumbnailUrl = mediaUrl;
+// //         durationSeconds = 0;
+// //       } finally {
+// //         if (fs.existsSync(tempVideoPath)) fs.unlinkSync(tempVideoPath); // cleanup temp video
+// //       }
+// //     }
+
+// //     // Step 3: Save post in MongoDB
+// //     const newPost = new Post({
+// //       userId,
+// //       title,
+// //       tags: tags ? tags.split(",").map((t) => t.trim()) : [],
+// //       media: mediaUrl,
+// //       thumbnail: thumbnailUrl,
+// //       mediaType,
+// //       duration: durationSeconds, // store as number
+// //       likes: [],
+// //       comments: [],
+// //     });
+
+// //     const savedPost = await newPost.save();
+
+// //     res.status(200).json({
+// //       success: true,
+// //       post: savedPost,
+// //       mediaUrl,
+// //       thumbnailUrl,
+// //       duration: durationSeconds,
+// //       durationISO: secondsToISO(durationSeconds), // frontend/Google-ready
+// //     });
+
+// //     log("✅ Upload completed successfully for:", file.originalname);
+// //   } catch (error) {
+// //     errLog("❌ Upload failed:", error);
+// //     res.status(500).json({ error: error.message || "Upload failed" });
+// //   }
+// // });
+
+// // // Optional check route
+// // router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
+
+// // module.exports = router;
+
+
+
+
+
+
+
+
+
+// // const express = require("express");
+// // const router = express.Router();
+// // const multer = require("multer");
+// // const ffmpeg = require("fluent-ffmpeg");
+// // const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+// // const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+// // const dotenv = require("dotenv");
+// // const fs = require("fs");
+// // const path = require("path");
+// // const Post = require("../models/Post");
+// // const verifyToken = require("../middleware/verifyToken");
+
+// // dotenv.config();
+// // ffmpeg.setFfmpegPath(ffmpegPath);
+
+// // // 🟩 Debug Log Helper
+// // const log = (...args) => console.log("🟩 [DEBUG]", ...args);
+// // const errLog = (...args) => console.error("❌ [ERROR]", ...args);
+
+// // // ✅ Cloudflare R2 (AWS SDK v3)
+// // const r2Client = new S3Client({
+// //   region: "auto",
+// //   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+// //   credentials: {
+// //     accessKeyId: process.env.R2_ACCESS_KEY_ID,
+// //     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+// //   },
+// // });
+
+// // const BUCKET_NAME = process.env.R2_BUCKET_NAME;
+// // const PUBLIC_BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
+
+
+// // // 🎬 Convert video duration → ISO 8601 format (Google-friendly)
+// // function getVideoDurationISO(filePath) {
+// //   return new Promise((resolve, reject) => {
+// //     ffmpeg.ffprobe(filePath, (err, metadata) => {
+// //       if (err) return reject(err);
+
+// //       const totalSeconds = Math.floor(metadata.format.duration);
+
+// //       const hours = Math.floor(totalSeconds / 3600);
+// //       const minutes = Math.floor((totalSeconds % 3600) / 60);
+// //       const seconds = totalSeconds % 60;
+
+// //       const iso =
+// //         "PT" +
+// //         (hours > 0 ? `${hours}H` : "") +
+// //         (minutes > 0 ? `${minutes}M` : "") +
+// //         (seconds > 0 ? `${seconds}S` : "");
+
+// //       resolve(iso);
+// //     });
+// //   });
+// // }
+
+
+
+// // // ✅ Multer (in-memory)
+// // const upload = multer({ storage: multer.memoryStorage() });
+
+
+// // router.get("/check", (req, res) => {
+// //   res.json({ message: "Access granted!", user: req.user });
+// // });
+
+// // // ✅ UPLOAD ROUTE WITH DEBUGGING
+// // router.post("/upload",verifyToken, upload.single("file"), async (req, res) => {
+// //   const { file } = req;
+// //   const userId = req.user.UserId;
+// //   const { title, tags } = req.body;
+
+// //   if (!file) {
+// //     errLog("No file uploaded!");
+// //     return res.status(400).json({ error: "No file uploaded" });
+// //   }
+
+// //   log("Upload started for:", file.originalname);
+// //   log("Media type:", file.mimetype);
+
+// //   try {
+// //     const timestamp = Date.now();
+// //     const ext = path.extname(file.originalname);
+// //     const safeFileKey = `${timestamp}${ext}`;
+// //     const mediaType = file.mimetype;
+
+// //     // ✅ Step 1: Upload to R2
+// //     log("Uploading file to R2...");
+// //     await r2Client.send(
+// //       new PutObjectCommand({
+// //         Bucket: BUCKET_NAME,
+// //         Key: safeFileKey,
+// //         Body: file.buffer,
+// //         ContentType: mediaType,
+// //       })
+// //     );
+// //     log("✅ File uploaded to R2:", safeFileKey);
+
+// //     const mediaUrl = `${PUBLIC_BASE_URL}/${safeFileKey}`;
+// //     let thumbnailUrl = "";
+// //     let durationISO = null; // ⭐ will store video duration
+
+
+// //     // ✅ Step 2: Generate Thumbnail for Video
+// //     if (mediaType.startsWith("video")) {
+// //       log("Generating video thumbnail...");
+// //       const tempVideoPath = `/tmp/${timestamp}${ext}`;
+// //       const thumbFileName = `thumb-${timestamp}.png`;
+// //       const thumbPath = `/tmp/${thumbFileName}`;
+
+// //       fs.writeFileSync(tempVideoPath, file.buffer);
+// //       log("Temp video file written:", tempVideoPath);
+
+// //       await new Promise((resolve, reject) => {
+// //         ffmpeg(tempVideoPath)
+// //           .screenshots({
+// //             timestamps: ["00:00:01.000"],
+// //             filename: thumbFileName,
+// //             folder: "/tmp",
+// //             size: "320x240",
+// //           })
+// //           .on("end", () => {
+// //             log("✅ Thumbnail generated:", thumbFileName);
+// //             resolve();
+// //           })
+// //           .on("error", (error) => {
+// //             errLog("❌ Thumbnail generation failed:", error);
+// //             reject(error);
+// //           });
+// //       });
+
+// //       const thumbBuffer = fs.readFileSync(thumbPath);
+// //       await r2Client.send(
+// //         new PutObjectCommand({
+// //           Bucket: BUCKET_NAME,
+// //           Key: thumbFileName,
+// //           Body: thumbBuffer,
+// //           ContentType: "image/png",
+// //         })
+// //       );
+// //       log("✅ Thumbnail uploaded to R2:", thumbFileName);
+// //       thumbnailUrl = `${PUBLIC_BASE_URL}/${thumbFileName}`;
+      
+// //       durationISO = await getVideoDurationISO(tempVideoPath);
+// //       log("🎬 ISO Duration:", durationISO);
+
+      
+// //     } else if (mediaType.startsWith("image")) {
+// //       log("Image upload detected — no thumbnail generation needed.");
+// //       thumbnailUrl = mediaUrl;
+// //     } else {
+// //       errLog("Unsupported file type:", mediaType);
+// //       return res.status(400).json({ error: "Unsupported file type" });
+// //     }
+
+// //     // ✅ Step 3: Save Post in MongoDB
+// //     log("Saving post in MongoDB...");
+// //     const newPost = new Post({
+// //       userId,
+// //       title,
+// //       tags: tags ? tags.split(",").map((t) => t.trim()) : [],
+// //       media: mediaUrl,
+// //       thumbnail: thumbnailUrl,
+// //       mediaType,
+// //       duration: durationISO,
+// //       likes: [],
+// //       comments: [],
+// //     });
+
+// //     const savedPost = await newPost.save();
+// //     log("✅ Post saved successfully:", savedPost._id);
+
+// //     res.status(200).json({
+// //       success: true,
+// //       post: savedPost,
+// //       mediaUrl,
+// //       thumbnailUrl,
+// //       duration: durationISO,
+// //     });
+
+// //     log("✅ Upload completed successfully for:", file.originalname);
+// //   } catch (error) {
+// //     errLog("Upload failed:", error);
+// //     res.status(500).json({ error: error.message || "Upload failed" });
+// //   }
+// // });
+
+// // // ✅ Global crash logger (for Render/Vercel)
+// // process.on("unhandledRejection", (reason) => {
+// //   errLog("💥 Unhandled Rejection:", reason);
+// // });
+
+// // process.on("uncaughtException", (error) => {
+// //   errLog("💥 Uncaught Exception:", error);
+// // });
+
+// // module.exports = router;
 
 
 

@@ -40,6 +40,8 @@
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "@google/genai": "^0.8.0",
+    "@aws-sdk/s3-request-presigner": "^3.1022.0",
+  "uuid": "^11.0.0",
     "@google/generative-ai": "^0.24.0"
   }
 }

@@ -32,13 +32,13 @@ const BUCKET_ID = "685fc9880036ec074baf";
 
 
 
+
 router.get("/related/mango/getall", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = 30;
     const skip = (page - 1) * limit;
 
-    // 1️⃣ Strict Match: Filters only videos (Supports your explicit mediaType flag OR classic regex file extension check)
     const videoFilter = {
       $or: [
         { mediaType: "video" },
@@ -46,76 +46,113 @@ router.get("/related/mango/getall", async (req, res) => {
       ]
     };
 
-    // 2️⃣ Fetch Posts: Only videos, sorted by latest first, handling pagination pipelines safely
-    let posts = await Post.find(videoFilter)
-      .sort({ createdAt: -1 })
+    const posts = await Post.find(videoFilter)
+      .sort({ createdAt: -1 }) // Latest first
       .skip(skip)
       .limit(limit)
       .populate("userId", "username profilePic")
-      // Including structural fields needed for full interactions/comments in the client UI
       .populate({
         path: "comments.userId",
         select: "username profilePic"
       });
 
-    // 3️⃣ Random injection for discovery (Page 1 Only)
-    // Injects a localized selection of unexpected videos to keep the layout feeling dynamic
-    if (page === 1 && posts.length > 0) {
-      try {
-        const randomVideos = await Post.aggregate([
-          { $match: videoFilter },
-          { $sample: { size: 4 } },
-          {
-            $lookup: {
-              from: "users",
-              localField: "userId",
-              foreignField: "_id",
-              as: "userId"
-            }
-          },
-          {
-            $unwind: {
-              path: "$userId",
-              preserveNullAndEmptyArrays: true
-            }
-          }
-        ]);
-
-        // Merge discovery items with chronological feed
-        posts = [...posts, ...randomVideos];
-      } catch (aggError) {
-        console.error("Non-blocking aggregation failure:", aggError.message);
-      }
-    }
-
-    // 4️⃣ Deduplicate entries cleanly matching internal IDs
-    const uniqueMap = new Map();
-    posts.forEach(post => {
-      if (post && post._id) {
-        uniqueMap.set(post._id.toString(), post);
-      }
-    });
-    posts = Array.from(uniqueMap.values());
-
-    // 5️⃣ Soft Shuffle (Page 1 Only)
-    // Enhances user engagement patterns on initial mount
-    if (page === 1) {
-      posts.sort(() => Math.random() - 0.5);
-    }
-
-    // 6️⃣ Enforce strict boundary response layout limits
-    posts = posts.slice(0, limit);
-
     return res.status(200).json(posts);
 
   } catch (error) {
-    console.error("Pipeline breakdown fetching assets:", error);
+    console.error("Error fetching latest videos:", error);
+
     return res.status(500).json({
-      message: "Error fetching video pipeline content",
+      message: "Error fetching latest videos",
       error: error.message,
     });
   }
 });
+
+
+// router.get("/related/mango/getall", async (req, res) => {
+//   try {
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = 30;
+//     const skip = (page - 1) * limit;
+
+//     // 1️⃣ Strict Match: Filters only videos (Supports your explicit mediaType flag OR classic regex file extension check)
+//     const videoFilter = {
+//       $or: [
+//         { mediaType: "video" },
+//         { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
+//       ]
+//     };
+
+//     // 2️⃣ Fetch Posts: Only videos, sorted by latest first, handling pagination pipelines safely
+//     let posts = await Post.find(videoFilter)
+//       .sort({ createdAt: -1 })
+//       .skip(skip)
+//       .limit(limit)
+//       .populate("userId", "username profilePic")
+//       // Including structural fields needed for full interactions/comments in the client UI
+//       .populate({
+//         path: "comments.userId",
+//         select: "username profilePic"
+//       });
+
+//     // 3️⃣ Random injection for discovery (Page 1 Only)
+//     // Injects a localized selection of unexpected videos to keep the layout feeling dynamic
+//     if (page === 1 && posts.length > 0) {
+//       try {
+//         const randomVideos = await Post.aggregate([
+//           { $match: videoFilter },
+//           { $sample: { size: 4 } },
+//           {
+//             $lookup: {
+//               from: "users",
+//               localField: "userId",
+//               foreignField: "_id",
+//               as: "userId"
+//             }
+//           },
+//           {
+//             $unwind: {
+//               path: "$userId",
+//               preserveNullAndEmptyArrays: true
+//             }
+//           }
+//         ]);
+
+//         // Merge discovery items with chronological feed
+//         posts = [...posts, ...randomVideos];
+//       } catch (aggError) {
+//         console.error("Non-blocking aggregation failure:", aggError.message);
+//       }
+//     }
+
+//     // 4️⃣ Deduplicate entries cleanly matching internal IDs
+//     const uniqueMap = new Map();
+//     posts.forEach(post => {
+//       if (post && post._id) {
+//         uniqueMap.set(post._id.toString(), post);
+//       }
+//     });
+//     posts = Array.from(uniqueMap.values());
+
+//     // 5️⃣ Soft Shuffle (Page 1 Only)
+//     // Enhances user engagement patterns on initial mount
+//     if (page === 1) {
+//       posts.sort(() => Math.random() - 0.5);
+//     }
+
+//     // 6️⃣ Enforce strict boundary response layout limits
+//     posts = posts.slice(0, limit);
+
+//     return res.status(200).json(posts);
+
+//   } catch (error) {
+//     console.error("Pipeline breakdown fetching assets:", error);
+//     return res.status(500).json({
+//       message: "Error fetching video pipeline content",
+//       error: error.message,
+//     });
+//   }
+// });
 
 
 router.post("/number/sync-contacts", (req, res) => {

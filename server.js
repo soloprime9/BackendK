@@ -12,6 +12,8 @@ const Search = require("./routers/autoai");
 const Demo = require("./routers/demo");
 const analyticsRoutes = require("./routers/analytics");
 const pwaAnalyticsRoute = require("./routers/pwaAnalytics");
+const reminderRoutes = require("./routers/reminder");
+
 
 const app = express();
 const server = http.createServer(app);
@@ -49,6 +51,8 @@ app.use("/autoai", Search);
 app.use("/demo", Demo);
 app.use("/analytics", analyticsRoutes);
 app.use("/api/pwa", pwaAnalyticsRoute);
+app.use("/api/reminders", reminderRoutes);
+
 
 // ================= START SERVER =================
 

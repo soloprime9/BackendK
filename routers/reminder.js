@@ -3,6 +3,7 @@ const router = express.Router();
 const Reminder = require("../models/Reminder");
 // Assuming you have an auth middleware to get req.user.id
 // const auth = require("../middleware/auth"); 
+const User = require("../models/NewUser");
 
 /**
  * @route   POST /api/reminders
@@ -162,5 +163,28 @@ router.put("/:id/complete", async (req, res) => {
       res.status(500).json({ error: error.message });
     }
   });
+
+// REGISTER
+router.post("/signup", async (req, res) => {
+  try {
+    const newUser = new User(req.body);
+    const savedUser = await newUser.save();
+    res.status(201).json(savedUser);
+  } catch (err) {
+    res.status(400).json({ error: "Email already exists" });
+  }
+});
+
+// LOGIN
+router.post("/login", async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.body.email, password: req.body.password });
+    if (!user) return res.status(404).json("Wrong credentials");
+    res.status(200).json(user);
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
 
 module.exports = router;

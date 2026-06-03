@@ -51,7 +51,7 @@ app.use("/autoai", Search);
 app.use("/demo", Demo);
 app.use("/analytics", analyticsRoutes);
 app.use("/api/pwa", pwaAnalyticsRoute);
-app.use("/api/reminders", reminderRoutes);
+app.use("/reminder", reminderRoutes);
 
 
 // ================= START SERVER =================

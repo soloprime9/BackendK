@@ -9,7 +9,19 @@ const User = require("../models/NewUser");
  * @route   POST /api/reminders
  * @desc    Create an advanced reminder
  */
-router.post("/", async (req, res) => {
+
+
+router.get("/", async (req, res) => {
+  try {
+    res.status(200).json("hello world");
+  } catch (err) {
+    // Fixed: changed 'error' to 'err' to match the catch block parameter
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+
+router.post("/upload", async (req, res) => {
   try {
     const { 
         title, description, dueDate, priority, 

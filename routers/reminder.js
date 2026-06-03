@@ -15,8 +15,7 @@ router.get("/", async (req, res) => {
   try {
     res.status(200).json("hello world");
   } catch (err) {
-    // Fixed: changed 'error' to 'err' to match the catch block parameter
-    res.status(500).json({ error: err.message }); 
+    console.log(err)
   }
 });
 

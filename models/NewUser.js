@@ -6,4 +6,4 @@ const UserSchema = new Schema({
   password: { type: String, required: true } // In production, hash this!
 }, { timestamps: true });
 
-module.exports = model("User", UserSchema);
+module.exports = model("NewUser", UserSchema);

@@ -13,25 +13,270 @@ const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const { InputFile } = require("node-appwrite/file");
-const { Client, Storage, ID, Permission, Role } = require("node-appwrite");
-
+const { getIO } = require("../socket");
 const verifyToken = require("../middleware/verifyToken");
 const Post = require("../models/Post");
 const User = require("../models/User");
+const Notification = require("../models/Notification");
+const Report = require("../models/Report");
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Helper to safely emit real-time events without crashing if socket is absent
+function emitRealtimeEvent(event, data) {
+  try {
+    const io = getIO();
+    if (io) io.emit(event, data);
+  } catch (_) {}
+}
 
-const client = new Client()
-  .setEndpoint('https://nyc.cloud.appwrite.io/v1')
-  .setProject('fondpeace')
-  .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
+// Helper to create notification while respecting recipient's notification preferences
+async function dispatchNotification({ recipient, sender, type, post = null, commentText = "" }) {
+  try {
+    if (!recipient || !sender || recipient.toString() === sender.toString()) return null;
 
-const storage = new Storage(client);
-const BUCKET_ID = "685fc9880036ec074baf";
+    const recipientUser = await User.findById(recipient).select("notificationPreferences");
+    if (recipientUser && recipientUser.notificationPreferences) {
+      const prefs = recipientUser.notificationPreferences;
+      if (type === "like" && prefs.notifyLikes === false) return null;
+      if (type === "comment" && prefs.notifyComments === false) return null;
+      if (type === "mention" && prefs.notifyMentions === false) return null;
+      if (type === "repost" && prefs.notifyReposts === false) return null;
+      if (type === "follow" && prefs.notifyFollows === false) return null;
+    }
+
+    const notif = await Notification.create({ recipient, sender, type, post, commentText });
+    emitRealtimeEvent("new_notification", {
+      type,
+      postId: post,
+      byUser: sender,
+      targetUser: recipient,
+      timestamp: new Date()
+    });
+    return notif;
+  } catch (err) {
+    console.error("dispatchNotification error:", err.message);
+    return null;
+  }
+}
 
 
 
+
+// 🛡️ ANTI-SPAM IN-MEMORY SLIDING WINDOW RATE LIMITER
+const rateLimitMap = new Map();
+function checkRateLimit(key, maxRequests = 10, windowMs = 60000) {
+  const now = Date.now();
+  const timestamps = rateLimitMap.get(key) || [];
+  const recent = timestamps.filter(t => now - t < windowMs);
+  if (recent.length >= maxRequests) return false;
+  recent.push(now);
+  rateLimitMap.set(key, recent);
+  if (rateLimitMap.size > 10000) rateLimitMap.clear();
+  return true;
+}
+
+// 🔗 OPENGRAPH LINK PREVIEW EXTRACTOR
+async function extractOpenGraph(rawUrl) {
+  try {
+    if (!rawUrl || typeof rawUrl !== "string") return null;
+    let validUrl = rawUrl.trim();
+    if (!/^https?:\/\//i.test(validUrl)) validUrl = `https://${validUrl}`;
+
+    const parsedUrl = new URL(validUrl);
+
+    // 1. YouTube official oEmbed (instant, never blocked)
+    if (parsedUrl.hostname.includes("youtube.com") || parsedUrl.hostname.includes("youtu.be")) {
+      try {
+        const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(validUrl)}&format=json`);
+        if (oembedRes.ok) {
+          const ytData = await oembedRes.json();
+          return {
+            url: validUrl,
+            title: ytData.title || "YouTube Video",
+            description: `Watch on YouTube • by ${ytData.author_name || "Creator"}`,
+            image: ytData.thumbnail_url || "",
+            siteName: "YouTube",
+            favicon: "https://www.youtube.com/favicon.ico"
+          };
+        }
+      } catch (_) {}
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(validUrl, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+      }
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const getMeta = (prop) => {
+      const regex = new RegExp(`<meta\\s+[^>]*?(?:property|name)=["'](?:og:|twitter:)?${prop}["'][^>]*?content=["']([^"']*)["']`, "i");
+      const altRegex = new RegExp(`<meta\\s+[^>]*?content=["']([^"']*)["'][^>]*?(?:property|name)=["'](?:og:|twitter:)?${prop}["']`, "i");
+      const match = html.match(regex) || html.match(altRegex);
+      return match ? match[1].trim() : "";
+    };
+
+    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+    const title = getMeta("title") || (titleMatch ? titleMatch[1].trim() : "");
+    const description = getMeta("description");
+    const image = getMeta("image");
+    const siteName = getMeta("site_name") || parsedUrl.hostname.replace(/^www\./, "");
+
+    const faviconMatch = html.match(/<link[^>]*rel=["'](?:shortcut )?icon["'][^>]*href=["']([^"']*)["']/i);
+    let favicon = faviconMatch ? faviconMatch[1] : "/favicon.ico";
+    if (favicon && !favicon.startsWith("http")) {
+      try { favicon = new URL(favicon, validUrl).href; } catch (_) {}
+    }
+
+    let finalImage = image;
+    // YouTube thumbnail fallback
+    if (!finalImage && (parsedUrl.hostname.includes("youtube.com") || parsedUrl.hostname.includes("youtu.be"))) {
+      let vidId = null;
+      if (parsedUrl.hostname.includes("youtu.be")) {
+        vidId = parsedUrl.pathname.slice(1).split(/[?&]/)[0];
+      } else {
+        vidId = parsedUrl.searchParams.get("v");
+      }
+      if (vidId) {
+        finalImage = `https://img.youtube.com/vi/${vidId}/hqdefault.jpg`;
+      }
+    }
+
+    if (!title && !description && !finalImage) return null;
+
+    return {
+      url: validUrl,
+      title: title.slice(0, 180),
+      description: description.slice(0, 250),
+      image: finalImage || "",
+      siteName,
+      favicon: favicon || ""
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+// CREATE POST (Supports text posts, media, hashtags & interactive polls)
+router.post(["/create", "/add"], verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.UserId;
+
+    // 1. Anti-spam check (Max 8 posts per minute per user)
+    if (!checkRateLimit(`post_${userId}`, 8, 60000)) {
+      return res.status(429).json({ message: "Slow down! You can only create up to 8 posts per minute." });
+    }
+
+    const { title, media, mediaType, thumbnail, category, tags, poll, linkPreview, location } = req.body;
+
+    if (!title && !media && !poll) {
+      return res.status(400).json({ message: "Post must have text content, media, or a poll" });
+    }
+
+    // Extract hashtags from title
+    const extractedTags = Array.isArray(tags) ? tags : [];
+    const titleTags = ((title || "").match(/#\w+/g) || []).map(t => t.replace("#", ""));
+    const allTags = [...new Set([...extractedTags, ...titleTags])];
+
+    // Generate slug
+    const baseSlug = (title || "post")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 50)
+      .replace(/^-+|-+$/g, "");
+    const slug = `${baseSlug || "post"}-${Date.now()}`;
+
+    // Validate poll if provided (Supports custom expiry duration in hours)
+    let pollData = undefined;
+    if (poll && poll.question && Array.isArray(poll.options) && poll.options.length >= 2) {
+      const durationHours = parseInt(poll.durationHours) || (poll.duration ? parseInt(poll.duration) : 24);
+      pollData = {
+        question: poll.question.trim(),
+        options: poll.options.map((opt) => {
+          const val = typeof opt === "string" ? opt.trim() : (opt.optionText || opt.text || "");
+          return {
+            optionText: val,
+            votes: []
+          };
+        }),
+        expiresAt: poll.expiresAt ? new Date(poll.expiresAt) : new Date(Date.now() + durationHours * 3600000)
+      };
+    }
+
+    // Auto-detect URL in title for link preview if not explicitly passed
+    let finalLinkPreview = linkPreview;
+    if (!finalLinkPreview && title) {
+      const urlMatch = title.match(/https?:\/\/[^\s]+/i);
+      if (urlMatch) {
+        finalLinkPreview = await extractOpenGraph(urlMatch[0]);
+      }
+    }
+
+    const newPost = new Post({
+      userId,
+      title: title || "",
+      slug,
+      media: media || "",
+      mediaType: mediaType || (media ? "image" : "text"),
+      thumbnail: thumbnail || "",
+      category: category || "Entertainment",
+      tags: allTags,
+      poll: pollData,
+      linkPreview: finalLinkPreview || undefined,
+      location: location?.trim() || "",
+      trendingScore: 10,
+      likes: [],
+      comments: []
+    });
+
+    const saved = await newPost.save();
+
+    // Auto-detect and notify @mentions in post title
+    const mentionedHandles = ((title || "").match(/@([a-zA-Z0-9_]+)/g) || [])
+      .map(m => m.replace("@", "").toLowerCase());
+
+    if (mentionedHandles.length > 0) {
+      try {
+        const mentionedUsers = await User.find({
+          username: { $in: mentionedHandles },
+          _id: { $ne: userId }
+        }).select("_id");
+
+        for (const u of mentionedUsers) {
+          await Notification.create({
+            recipient: u._id,
+            sender: userId,
+            type: "mention",
+            post: saved._id,
+            commentText: title || ""
+          });
+
+          emitRealtimeEvent("new_notification", {
+            type: "mention",
+            postId: saved._id,
+            byUser: userId,
+            targetUser: u._id,
+            timestamp: new Date()
+          });
+        }
+      } catch (mentionErr) {
+        console.error("Post mention error:", mentionErr.message);
+      }
+    }
+
+    const populated = await Post.findById(saved._id).populate("userId", "name username profilePicture isVerified");
+
+    return res.status(201).json(populated);
+  } catch (error) {
+    console.error("Create Post Error:", error);
+    return res.status(500).json({ message: "Error creating post", error: error.message });
+  }
+});
 
 router.get("/related/mango/getall", async (req, res) => {
   try {
@@ -41,7 +286,7 @@ router.get("/related/mango/getall", async (req, res) => {
 
     const videoFilter = {
       $or: [
-        { mediaType: "video" },
+        { mediaType: { $regex: /video/i } },
         { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
       ]
     };
@@ -78,7 +323,7 @@ router.get("/related/mango/getall", async (req, res) => {
 //     // 1️⃣ Strict Match: Filters only videos (Supports your explicit mediaType flag OR classic regex file extension check)
 //     const videoFilter = {
 //       $or: [
-//         { mediaType: "video" },
+//         { mediaType: { $regex: /video/i } },
 //         { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
 //       ]
 //     };
@@ -329,7 +574,7 @@ router.get("/blog/:category/:slug", async (req, res) => {
 router.get("/fix-image-types", async (req, res) => {
   const result = await Post.updateMany(
     { mediaType: { $regex: /^image\// } }, // image/jpeg, image/png etc
-    { $set: { mediaType: "image" } }
+    { $set: { mediaType: { $regex: /image/i } } }
   );
 
   res.json({
@@ -349,7 +594,7 @@ router.get("/fix-mediaType-full", async (req, res) => {
       ]
     },
     {
-      $set: { mediaType: "video" }
+      $set: { mediaType: { $regex: /video/i } }
     }
   );
 
@@ -362,7 +607,7 @@ router.get("/fix-mediaType-full", async (req, res) => {
       ]
     },
     {
-      $set: { mediaType: "image" }
+      $set: { mediaType: { $regex: /image/i } }
     }
   );
 
@@ -397,7 +642,7 @@ router.get("/fix-mediaType-smart", async (req, res) => {
       ]
     },
     {
-      $set: { mediaType: "video" }
+      $set: { mediaType: { $regex: /video/i } }
     }
   );
 
@@ -431,6 +676,14 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
       );
     } else {
       like.likes.push(userObjectId);
+      if (like.userId && like.userId.toString() !== UserId.toString()) {
+        await dispatchNotification({
+          recipient: like.userId,
+          sender: UserId,
+          type: "like",
+          post: like._id
+        });
+      }
     }
 
     // Optional: Clean null/invalid entries
@@ -467,33 +720,160 @@ router.post("/view/:id", async (req, res) => {
 router.get("/mango/getall", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = 30;
+    const limit = Math.min(parseInt(req.query.limit) || 12, 30);
     const skip = (page - 1) * limit;
+    const type = (req.query.type || "").toLowerCase();
+    const tag = req.query.tag;
+    const category = req.query.category;
+    const sort = req.query.sort;
 
-    const videoFilter = {
-      $or: [
-        { mediaType: "video" },
-        { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
-      ]
-    };
+    let queryFilter = {};
 
-    const posts = await Post.find(videoFilter)
-      .sort({ createdAt: -1 }) // Latest first
+    // 1. Tag filter
+    if (tag) {
+      const cleanTag = tag.replace(/^#/, "");
+      queryFilter.$or = [
+        { tags: { $in: [cleanTag, `#${cleanTag}`] } },
+        { title: { $regex: `#${cleanTag}\\b`, $options: "i" } }
+      ];
+    }
+
+    // 2. Category filter
+    if (category && category !== "All") {
+      queryFilter.category = category;
+    }
+
+    // 2B. Location filter (Find posts near or from a city)
+    const locationQuery = req.query.location;
+    if (locationQuery) {
+      queryFilter.location = { $regex: locationQuery.trim(), $options: "i" };
+    }
+
+    // 2C. Personalized Topics filter (Multi-topic preference)
+    const topics = req.query.topics;
+    if (topics && (!category || category === "All")) {
+      const topicList = topics.split(",").map((t) => t.trim()).filter(Boolean);
+      if (topicList.length > 0) {
+        queryFilter.$or = [
+          { category: { $in: topicList } },
+          { tags: { $in: topicList } },
+          { tags: { $in: topicList.map((t) => `#${t}`) } }
+        ];
+      }
+    }
+
+    // 3. Intelligent Media Type Filter (Supports ALL mixed content by default, or specific filters)
+    if (type === "video") {
+      queryFilter.$and = queryFilter.$and || [];
+      queryFilter.$and.push({
+        $or: [
+          { mediaType: { $regex: /video/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
+        ]
+      });
+    } else if (type === "image" || type === "photo") {
+      queryFilter.$and = queryFilter.$and || [];
+      queryFilter.$and.push({
+        $or: [
+          { mediaType: { $regex: /image/i } },
+          { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } }
+        ]
+      });
+    } else if (type === "discussion" || type === "text") {
+      queryFilter.$and = queryFilter.$and || [];
+      queryFilter.$and.push({
+        $or: [
+          { mediaType: "text" },
+          { media: "" },
+          { media: null },
+          { media: { $exists: false } },
+          { "poll.question": { $exists: true, $ne: "" } }
+        ]
+      });
+    } else if (type === "poll") {
+      queryFilter["poll.question"] = { $exists: true, $ne: "" };
+    }
+    // When type === "all" or undefined: queryFilter allows ALL content types for a rich mixed social feed!
+
+    // 4. Sort order
+    let sortOptions = { isPinned: -1, createdAt: -1 };
+    if (sort === "trending") {
+      sortOptions = { views: -1, trendingScore: -1, createdAt: -1 };
+    }
+
+    if (!type || type === "all") {
+      // Balanced mixed feed: Guarantee both video reels and non-video posts (images, discussions, polls) appear on the discovery stream!
+      const halfLimit = Math.ceil(limit / 2);
+      const halfSkip = (page - 1) * halfLimit;
+
+      const videoFilter = {
+        ...queryFilter,
+        $or: [
+          { mediaType: { $regex: /video/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
+        ]
+      };
+
+      const nonVideoFilter = {
+        ...queryFilter,
+        $or: [
+          { mediaType: { $in: ["image", "text", "discussion"] } },
+          { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } },
+          { media: "" },
+          { media: null },
+          { media: { $exists: false } },
+          { "poll.question": { $exists: true, $ne: "" } }
+        ]
+      };
+
+      const [videoPosts, nonVideoPosts] = await Promise.all([
+        Post.find(videoFilter)
+          .sort(sortOptions)
+          .skip(halfSkip)
+          .limit(halfLimit)
+          .populate("userId", "username name profilePic profilePicture isVerified isEmailVerified category tagline")
+          .populate({
+            path: "comments.userId",
+            select: "username name profilePic profilePicture isVerified isEmailVerified"
+          }),
+        Post.find(nonVideoFilter)
+          .sort(sortOptions)
+          .skip(halfSkip)
+          .limit(halfLimit)
+          .populate("userId", "username name profilePic profilePicture isVerified isEmailVerified category tagline")
+          .populate({
+            path: "comments.userId",
+            select: "username name profilePic profilePicture isVerified isEmailVerified"
+          })
+      ]);
+
+      const interleaved = [];
+      const maxLen = Math.max(videoPosts.length, nonVideoPosts.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (i < nonVideoPosts.length) interleaved.push(nonVideoPosts[i]);
+        if (i < videoPosts.length) interleaved.push(videoPosts[i]);
+      }
+
+      return res.status(200).json(interleaved.slice(0, limit));
+    }
+
+    const posts = await Post.find(queryFilter)
+      .sort(sortOptions)
       .skip(skip)
       .limit(limit)
-      .populate("userId", "username profilePic")
+      .populate("userId", "username name profilePic profilePicture isVerified isEmailVerified category tagline")
       .populate({
         path: "comments.userId",
-        select: "username profilePic"
+        select: "username name profilePic profilePicture isVerified isEmailVerified"
       });
 
     return res.status(200).json(posts);
 
   } catch (error) {
-    console.error("Error fetching latest videos:", error);
+    console.error("Error fetching feed posts:", error);
 
     return res.status(500).json({
-      message: "Error fetching latest videos",
+      message: "Error fetching feed posts",
       error: error.message,
     });
   }
@@ -894,8 +1274,14 @@ router.get('/shorts', async (req, res) => {
 
 router.post("/comment/:postId", verifyToken, async (req, res) => {
   try {
-    const CommentText = req.body.CommentText;
     const userId = req.user.UserId; // from decoded token
+
+    // Anti-spam check (Max 20 comments per minute per user)
+    if (!checkRateLimit(`comment_${userId}`, 20, 60000)) {
+      return res.status(429).json({ message: "Slow down! You can only post up to 20 comments per minute." });
+    }
+
+    const CommentText = req.body.CommentText;
     const postId = req.params.postId;
 
     const post = await Post.findById(postId);
@@ -911,8 +1297,70 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
       replies: [] // ✅ optional, but better to initialize
     };
 
+    if (!Array.isArray(post.comments)) {
+      post.comments = [];
+    }
     post.comments.push(comment);
     await post.save({ validateModifiedOnly: true });
+
+    if (post.userId && post.userId.toString() !== userId.toString()) {
+      try {
+        await Notification.create({
+          recipient: post.userId,
+          sender: userId,
+          type: "comment",
+          post: post._id,
+          commentText: CommentText
+        });
+      } catch (notifErr) {
+        console.error("Persist comment notification error:", notifErr.message);
+      }
+      emitRealtimeEvent("new_notification", {
+        type: "comment",
+        postId: post._id,
+        commentText: CommentText,
+        byUser: userId,
+        targetUser: post.userId,
+        timestamp: new Date()
+      });
+    }
+
+    // Auto-detect and notify @mentions in comment text
+    const commentMentions = ((CommentText || "").match(/@([a-zA-Z0-9_]+)/g) || [])
+      .map(m => m.replace("@", "").toLowerCase());
+
+    if (commentMentions.length > 0) {
+      try {
+        const mentionedUsers = await User.find({
+          username: { $in: commentMentions },
+          _id: { $ne: userId }
+        }).select("_id");
+
+        for (const u of mentionedUsers) {
+          // Avoid duplicate notification if mentioned user is already the post author
+          if (!post.userId || u._id.toString() !== post.userId.toString()) {
+            await Notification.create({
+              recipient: u._id,
+              sender: userId,
+              type: "mention",
+              post: post._id,
+              commentText: CommentText
+            });
+
+            emitRealtimeEvent("new_notification", {
+              type: "mention",
+              postId: post._id,
+              commentText: CommentText,
+              byUser: userId,
+              targetUser: u._id,
+              timestamp: new Date()
+            });
+          }
+        }
+      } catch (mentionErr) {
+        console.error("Comment mention error:", mentionErr.message);
+      }
+    }
 
     res.status(200).json(post);
   } catch (error) {
@@ -930,10 +1378,15 @@ router.get("/comment/:postId", async (req, res) => {
   try {
     const postId = req.params.postId;
 
-    const post = await Post.findById(postId).populate({
-      path: 'comments.userId',
-      select: 'username profilePicture'
-    });
+    const post = await Post.findById(postId)
+      .populate({
+        path: 'comments.userId',
+        select: 'username profilePicture isVerified name'
+      })
+      .populate({
+        path: 'comments.replies.userId',
+        select: 'username profilePicture isVerified name'
+      });
 
     if (!post) {
       return res.status(404).json("Post Not Found");
@@ -968,7 +1421,13 @@ router.post("/comment/:postId/reply/:commentId", verifyToken, async (req, res) =
     });
 
     await post.save({ validateModifiedOnly: true });
-    res.status(200).json(comment.replies);
+
+    const populatedPost = await Post.findById(postId).populate({
+      path: 'comments.replies.userId',
+      select: 'username profilePicture isVerified name'
+    });
+    const updatedComment = populatedPost ? populatedPost.comments.id(commentId) : comment;
+    res.status(200).json(updatedComment ? updatedComment.replies : comment.replies);
   } catch (error) {
     console.error("Reply error:", error);
     res.status(500).json("Server Error");
@@ -2031,195 +2490,729 @@ router.get("/video/getall", async (req, res) => {
 
 
 
-// const express = require("express");
-// const router = express.Router();
-// const multer = require("multer");
-// const fs = require("fs");
-// const path = require("path");
-  
-// const ffmpeg = require("fluent-ffmpeg");
-// const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-// ffmpeg.setFfmpegPath(ffmpegPath);
+// =====================================================================
+// 🚀 PHASE 2: CORE SOCIAL PLATFORM ENGINE (2026 SOCIAL STANDARD)
+// =====================================================================
 
-// const { InputFile } = require("node-appwrite/file");
-// const { Client, Storage, ID, Permission, Role } = require("node-appwrite");
+// 1. FOR YOU ALGORITHMIC FEED (Trending, Engagement & Latest Social Content)
+router.get("/feed/for-you", async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
 
-// const verifyToken = require("../middleware/verifyToken");
-// const Post = require("../models/Post");
-// const User = require("../models/User");
+    // High velocity blend: Recent posts with engagement weight
+    const posts = await Post.find()
+      .sort({ createdAt: -1, trendingScore: -1, views: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("userId", "username bio profilePicture")
+      .populate({
+        path: "repostOf",
+        populate: { path: "userId", select: "username profilePicture" }
+      })
+      .populate({
+        path: "comments.userId",
+        select: "username profilePicture"
+      });
 
-// const upload = multer({ storage: multer.memoryStorage() });
+    const totalPosts = await Post.countDocuments();
 
-// const client = new Client()
-//   .setEndpoint('https://nyc.cloud.appwrite.io/v1')
-//   .setProject('fondpeace')
-//   .setKey('standard_9cb8608dc006c334c4b845280bdb2ffbe860b8487d3e23d394e6bd01c3c64bda113c5d24cc1517f73dea2cdb18c7e634b6f61777b6e154b6f968c070890382653269d818aba5b98158c37f2152c8a589f3283e70ff7478d2fdff081275f0f5318e3f037b111670a563680b6868871322935f3aac43bbf9befbb2a691f58c2bfa');
+    return res.status(200).json({
+      page,
+      limit,
+      totalPosts,
+      hasMore: skip + posts.length < totalPosts,
+      posts
+    });
+  } catch (error) {
+    console.error("For-You Feed Error:", error);
+    return res.status(500).json({ message: "Error loading For You feed", error: error.message });
+  }
+});
 
-// const storage = new Storage(client);
-// const BUCKET_ID = "685fc9880036ec074baf";
+// 2. FOLLOWING FEED (Chronological updates exclusively from followed creators)
+router.get("/feed/following", verifyToken, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
+    const currentUserId = req.user.UserId;
 
-// router.post("/upload", verifyToken, upload.single("file"), async (req, res) => {
-//   const timestamp = Date.now();
-//   const tmpDir = path.join(__dirname, "../tmp");
-//   const inputPath = path.join(tmpDir, `input-${timestamp}.mp4`);
-//   const thumbPath = path.join(tmpDir, `thumb-${timestamp}.png`);
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-//   try {
-//     const { file } = req;
-//     const userId = req.user.UserId;
-//     const { title, tags } = req.body;
+    if (!currentUser.Followings || currentUser.Followings.length === 0) {
+      return res.status(200).json({
+        page: 1,
+        totalPosts: 0,
+        hasMore: false,
+        posts: [],
+        message: "You are not following anyone yet. Discover creators in For You!"
+      });
+    }
 
-//     if (!file) return res.status(400).json({ error: "No file uploaded" });
+    let validFollowings = currentUser.Followings || [];
+    if (currentUser.mutedUsers && currentUser.mutedUsers.length > 0) {
+      validFollowings = validFollowings.filter(
+        id => id && !currentUser.mutedUsers.some(m => m && m.toString() === id.toString())
+      );
+    }
 
-//     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    const feedFilter = { userId: { $in: validFollowings } };
 
-//     fs.writeFileSync(inputPath, file.buffer);
+    if (currentUser.mutedKeywords && currentUser.mutedKeywords.length > 0) {
+      feedFilter.tags = { $nin: currentUser.mutedKeywords };
+    }
 
-//     const mediaType = file.mimetype;
-//     if (!mediaType.startsWith("video"))
-//       return res.status(400).json({ error: "Only video files allowed" });
+    const posts = await Post.find(feedFilter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate("userId", "username bio profilePicture")
+      .populate({
+        path: "repostOf",
+        populate: { path: "userId", select: "username profilePicture" }
+      })
+      .populate({
+        path: "comments.userId",
+        select: "username profilePicture"
+      });
 
-//     const uploadedVideo = await storage.createFile(
-//       BUCKET_ID,
-//       ID.unique(),
-//       InputFile.fromBuffer(file.buffer, file.originalname),
-//       [Permission.read(Role.any())]
-//     );
+    const totalPosts = await Post.countDocuments(feedFilter);
 
-//     const endpoint = client.config.endpoint;
-//     const project = client.config.project;
-//     const mediaUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedVideo.$id}/view?project=${project}`;
+    return res.status(200).json({
+      page,
+      limit,
+      totalPosts,
+      hasMore: skip + posts.length < totalPosts,
+      posts
+    });
+  } catch (error) {
+    console.error("Following Feed Error:", error);
+    return res.status(500).json({ message: "Error loading Following feed", error: error.message });
+  }
+});
 
-//     // Generate thumbnail
-//     await new Promise((resolve, reject) => {
-//       ffmpeg(inputPath)
-//         .on("end", resolve)
-//         .on("error", reject)
-//         .screenshots({
-//           timestamps: ["00:00:01.000"],
-//           filename: path.basename(thumbPath),
-//           folder: path.dirname(thumbPath),
-//           size: "320x240",
-//         });
-//     });
+// 3. TRENDING HASHTAGS ENGINE (Aggregates top tags across community posts)
+router.get("/trending/hashtags", async (req, res) => {
+  try {
+    const trendingTags = await Post.aggregate([
+      { $match: { tags: { $exists: true, $ne: [] } } },
+      { $unwind: "$tags" },
+      {
+        $project: {
+          tag: {
+            $toLower: {
+              $replaceAll: { input: "$tags", find: "#", replacement: "" }
+            }
+          }
+        }
+      },
+      { $match: { tag: { $ne: "" } } },
+      { $group: { _id: "$tag", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 20 }
+    ]);
 
-//     const thumbnailBuffer = fs.readFileSync(thumbPath);
-//     const uploadedThumb = await storage.createFile(
-//       BUCKET_ID,
-//       ID.unique(),
-//       InputFile.fromBuffer(thumbnailBuffer, "thumbnail.png"),
-//       [Permission.read(Role.any())]
-//     );
+    const formatted = trendingTags.map(item => ({
+      hashtag: `#${item._id}`,
+      name: item._id,
+      postsCount: item.count
+    }));
 
-//     const thumbnailUrl = `${endpoint}/storage/buckets/${BUCKET_ID}/files/${uploadedThumb.$id}/preview?project=${project}`;
+    return res.status(200).json({
+      success: true,
+      trending: formatted
+    });
+  } catch (error) {
+    console.error("Trending Hashtags Error:", error);
+    return res.status(500).json({ message: "Error loading trending hashtags", error: error.message });
+  }
+});
 
-//     const newPost = new Post({
-//       userId,
-//       title,
-//       tags: tags ? tags.split(",").map(tag => tag.trim()) : [],
-//       media: mediaUrl,
-//       thumbnail: thumbnailUrl,
-//       mediaType,
-//       likes: [],
-//       comments: [],
-//       medias: {
-//         url: mediaUrl,
-//         type: mediaType,
-//       },
-//     });
+// 4. HASHTAG POSTS SEARCH (Explore all posts matching a specific hashtag)
+router.get("/hashtag/:tag", async (req, res) => {
+  try {
+    const rawTag = req.params.tag.replace(/^#/, "").trim();
+    const tagRegex = new RegExp(`^#?${rawTag}$`, "i");
 
-//     const savedPost = await newPost.save();
+    const posts = await Post.find({ tags: tagRegex })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate("userId", "username profilePicture");
 
-//     res.status(200).json({
-//       success: true,
-//       post: savedPost,
-//       mediaUrl,
-//       thumbnail: thumbnailUrl,
-//     });
-//   } catch (err) {
-//     console.error("🔥 Thumbnail-only upload error:", err);
-//     res.status(500).json({ error: err.message || "Internal Server Error" });
-//   } finally {
-//     if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
-//     if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
-//   }
-// });
+    return res.status(200).json({
+      hashtag: `#${rawTag}`,
+      totalPosts: posts.length,
+      posts
+    });
+  } catch (error) {
+    console.error("Hashtag Search Error:", error);
+    return res.status(500).json({ message: "Error searching hashtag", error: error.message });
+  }
+});
 
+// 5. BOOKMARKS / SAVED POSTS API (Toggle Save/Unsave)
+router.post("/bookmark/:postId", verifyToken, async (req, res) => {
+  try {
+    const postId = req.params.postId;
+    const currentUserId = req.user.UserId;
 
+    const [post, user] = await Promise.all([
+      Post.findById(postId),
+      User.findById(currentUserId)
+    ]);
 
-// async function cleanDeadVideos() {
-//   const logs = [];
-//   let deletedCount = 0;
+    if (!post || !user) {
+      return res.status(404).json({ message: "Post or user not found" });
+    }
 
-//   try {
-//     const posts = await Post.find({ mediaType: "video" });
+    if (!user.bookmarks) {
+      user.bookmarks = [];
+    }
 
-//     console.log("Total video posts:", posts.length);
+    const isBookmarked = user.bookmarks.some(
+      id => id && id.toString() === postId.toString()
+    );
 
-//     for (const post of posts) {
-//       try {
-//         if (!post.media) {
-//           console.log("❌ EMPTY MEDIA:", post._id);
-//           continue;
-//         }
+    if (isBookmarked) {
+      // Remove bookmark
+      user.bookmarks = user.bookmarks.filter(
+        id => id && id.toString() !== postId.toString()
+      );
+      post.bookmarksCount = Math.max(0, (post.bookmarksCount || 1) - 1);
+    } else {
+      // Add bookmark
+      user.bookmarks.push(post._id);
+      post.bookmarksCount = (post.bookmarksCount || 0) + 1;
+    }
 
-//         await axios.head(post.media, { timeout: 5000 });
+    await Promise.all([user.save(), post.save()]);
 
-//       } catch (err) {
-//         console.log("❌ ERROR FOUND:");
-//         console.log("ID:", post._id);
-//         console.log("TITLE:", post.title);
-//         console.log("URL:", post.media);
-//         console.log("ERROR:", err.message);
+    return res.status(200).json({
+      bookmarked: !isBookmarked,
+      bookmarksCount: post.bookmarksCount,
+      message: isBookmarked ? "Post removed from bookmarks" : "Post saved to bookmarks"
+    });
+  } catch (error) {
+    console.error("Bookmark Error:", error);
+    return res.status(500).json({ message: "Error toggling bookmark", error: error.message });
+  }
+});
 
-//         logs.push({
-//           id: post._id,
-//           title: post.title,
-//           url: post.media,
-//           error: err.message,
-//           status: "DELETED"
-//         });
+// 6. GET ALL BOOKMARKED POSTS FOR LOGGED-IN USER
+router.get("/user/bookmarks", verifyToken, async (req, res) => {
+  try {
+    const currentUserId = req.user.UserId;
+    const user = await User.findById(currentUserId).populate({
+      path: "bookmarks",
+      populate: { path: "userId", select: "username profilePicture" }
+    });
 
-//         try {
-//           await Post.findByIdAndDelete(post._id);
-//           console.log("🔥 DELETED:", post._id);
-//           deletedCount++;
-//         } catch (deleteErr) {
-//           console.log("❌ DELETE ERROR:", deleteErr.message);
-//         }
-//       }
-//     }
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-//     console.log("FINAL DELETED:", deletedCount);
+    return res.status(200).json({
+      total: user.bookmarks ? user.bookmarks.length : 0,
+      bookmarks: user.bookmarks || []
+    });
+  } catch (error) {
+    console.error("Get Bookmarks Error:", error);
+    return res.status(500).json({ message: "Error fetching bookmarks", error: error.message });
+  }
+});
 
-//     return {
-//       success: true,
-//       deletedCount,
-//       logs
-//     };
+// 7. REPOST / QUOTE POST ENGINE (Viral Twitter/X Style Distribution)
+router.post("/repost/:postId", verifyToken, async (req, res) => {
+  try {
+    const originalPostId = req.params.postId;
+    const currentUserId = req.user.UserId;
+    const { comment } = req.body;
 
-//   } catch (error) {
-//     console.log("❌ MAIN ERROR:", error.message);
-//     return {
-//       success: false,
-//       error: error.message
-//     };
-//   }
-// }
+    const originalPost = await Post.findById(originalPostId);
+    if (!originalPost) {
+      return res.status(404).json({ message: "Original post not found" });
+    }
 
-// router.get("/run-cleanup", async (req, res) => {
-//   console.log("🚀 API HIT /run-cleanup");
-//   const result = await cleanDeadVideos();
-//   res.json(result);
-// });
+    // Create Repost
+    const repost = new Post({
+      userId: currentUserId,
+      title: comment || originalPost.title,
+      media: originalPost.media,
+      mediaType: originalPost.mediaType,
+      thumbnail: originalPost.thumbnail,
+      tags: originalPost.tags,
+      repostOf: originalPost._id,
+      category: originalPost.category || "Entertainment"
+    });
 
-// cron.schedule("0 */6 * * *", async () => {
-//   console.log("⏱️ CRON STARTED");
-//   const result = await cleanDeadVideos();
-//   console.log("⏱️ CRON DONE. Deleted:", result.deletedCount);
-// });
+    originalPost.repostsCount = (originalPost.repostsCount || 0) + 1;
 
+    await Promise.all([repost.save(), originalPost.save()]);
 
+    // Emit Realtime Notification to original post owner
+    if (originalPost.userId && originalPost.userId.toString() !== currentUserId.toString()) {
+      await dispatchNotification({
+        recipient: originalPost.userId,
+        sender: currentUserId,
+        type: "repost",
+        post: originalPost._id
+      });
+    }
 
+    const populatedRepost = await Post.findById(repost._id)
+      .populate("userId", "username profilePicture")
+      .populate({
+        path: "repostOf",
+        populate: { path: "userId", select: "username profilePicture" }
+      });
+
+    return res.status(201).json({
+      message: "Post successfully shared to your feed!",
+      repost: populatedRepost
+    });
+  } catch (error) {
+    console.error("Repost Error:", error);
+    return res.status(500).json({ message: "Error creating repost", error: error.message });
+  }
+});
+
+// 8. INTERACTIVE POLL VOTING ENGINE
+router.post("/poll/vote/:postId", verifyToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const { optionIndex } = req.body;
+    const userId = req.user.UserId;
+
+    if (optionIndex === undefined || optionIndex === null) {
+      return res.status(400).json({ message: "optionIndex is required" });
+    }
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    if (!post.poll || !Array.isArray(post.poll.options) || post.poll.options.length === 0) {
+      return res.status(400).json({ message: "This post does not contain an active poll" });
+    }
+
+    if (post.poll.expiresAt && new Date(post.poll.expiresAt) < new Date()) {
+      return res.status(400).json({ message: "This poll has ended" });
+    }
+
+    const idx = parseInt(optionIndex);
+    if (isNaN(idx) || idx < 0 || idx >= post.poll.options.length) {
+      return res.status(400).json({ message: "Invalid option index" });
+    }
+
+    // Check if user already voted in any option of this poll
+    const alreadyVoted = post.poll.options.some(opt =>
+      (opt.votes || []).some(id => id && id.toString() === userId.toString())
+    );
+
+    if (alreadyVoted) {
+      return res.status(400).json({ message: "You have already voted in this poll" });
+    }
+
+    if (!post.poll.options[idx].votes) {
+      post.poll.options[idx].votes = [];
+    }
+    post.poll.options[idx].votes.push(userId);
+    await post.save();
+
+    // Calculate aggregated results
+    const totalVotes = post.poll.options.reduce((sum, opt) => sum + (opt.votes ? opt.votes.length : 0), 0);
+    const optionsWithStats = post.poll.options.map((opt, i) => {
+      const count = opt.votes ? opt.votes.length : 0;
+      const label = opt.optionText || opt.text || "";
+      return {
+        index: i,
+        optionText: label,
+        text: label,
+        votesCount: count,
+        percentage: totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0,
+        hasVoted: i === idx
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Vote registered successfully",
+      totalVotes,
+      poll: {
+        question: post.poll.question,
+        expiresAt: post.poll.expiresAt,
+        options: optionsWithStats
+      }
+    });
+  } catch (error) {
+    console.error("Poll Vote Error:", error);
+    return res.status(500).json({ message: "Error recording vote", error: error.message });
+  }
+});
+
+// 9. PIN / UNPIN POST (Profile Spotlight)
+router.post("/pin/:postId", verifyToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.user.UserId;
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    if (!post.userId || post.userId.toString() !== userId.toString()) {
+      return res.status(403).json({ message: "You can only pin your own posts" });
+    }
+
+    if (post.isPinned) {
+      post.isPinned = false;
+      await post.save();
+      return res.status(200).json({
+        success: true,
+        isPinned: false,
+        message: "Post unpinned from your profile"
+      });
+    } else {
+      // Unpin any existing pinned post by this user
+      await Post.updateMany({ userId: userId, isPinned: true }, { isPinned: false });
+      post.isPinned = true;
+      await post.save();
+      return res.status(200).json({
+        success: true,
+        isPinned: true,
+        message: "Post pinned to the top of your profile!"
+      });
+    }
+  } catch (error) {
+    console.error("Pin Post Error:", error);
+    return res.status(500).json({ message: "Error updating pin status", error: error.message });
+  }
+});
+
+// 10. CONTENT REPORTING / SAFETY MODERATION
+router.post("/report/:postId", verifyToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.user.UserId;
+    const { reason, details } = req.body;
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    const report = new Report({
+      reportedBy: userId,
+      post: post._id,
+      user: post.userId,
+      reason: reason || "inappropriate_content",
+      details: (details || "").trim().slice(0, 500)
+    });
+
+    await report.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Thank you for keeping FondPeace safe. Our team will review this report promptly.",
+      reportId: report._id
+    });
+  } catch (error) {
+    console.error("Report Post Error:", error);
+    return res.status(500).json({ message: "Error submitting report", error: error.message });
+  }
+});
+
+// 11. UNIFIED SEARCH DISCOVERY SUITE (Creators, Posts, Videos & Tags)
+router.get("/search/unified", async (req, res) => {
+  try {
+    const q = (req.query.q || "").trim();
+    const type = (req.query.type || "all").toLowerCase();
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    if (!q) {
+      return res.status(200).json({
+        success: true,
+        query: "",
+        people: [],
+        posts: [],
+        total: 0
+      });
+    }
+
+    // Escape special characters in query string for safe regex search
+    const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const searchRegex = new RegExp(escapedQuery, "i");
+
+    const tasks = [];
+
+    // Search People / Creators if requested
+    if (type === "all" || type === "people" || type === "creators") {
+      tasks.push(
+        User.find({
+          $or: [
+            { username: searchRegex },
+            { name: searchRegex },
+            { bio: searchRegex }
+          ]
+        })
+          .select("name username bio profilePicture isVerified Followers")
+          .limit(10)
+          .lean()
+      );
+    } else {
+      tasks.push(Promise.resolve([]));
+    }
+
+    // Search Posts / Media if requested
+    if (type === "all" || type === "posts" || type === "videos" || type === "tags") {
+      const postFilter = {
+        $or: [
+          { title: searchRegex },
+          { tags: searchRegex },
+          { category: searchRegex }
+        ]
+      };
+
+      if (type === "videos") {
+        postFilter.$and = [
+          {
+            $or: [
+              { mediaType: { $regex: /video/i } },
+              { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
+            ]
+          }
+        ];
+      }
+
+      tasks.push(
+        Post.find(postFilter)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .populate("userId", "name username profilePicture isVerified")
+          .lean()
+      );
+
+      tasks.push(Post.countDocuments(postFilter));
+    } else {
+      tasks.push(Promise.resolve([]));
+      tasks.push(Promise.resolve(0));
+    }
+
+    const [people, posts, postsTotal] = await Promise.all(tasks);
+
+    // Format people with follower counts
+    const formattedPeople = (people || []).map(p => ({
+      _id: p._id,
+      name: p.name || p.username,
+      username: p.username,
+      bio: p.bio,
+      profilePicture: p.profilePicture || "/Fondpeace.jpg",
+      isVerified: !!p.isVerified,
+      followersCount: p.Followers ? p.Followers.length : 0
+    }));
+
+    return res.status(200).json({
+      success: true,
+      query: q,
+      type,
+      page,
+      limit,
+      results: {
+        people: formattedPeople,
+        posts: posts || [],
+        postsTotal: postsTotal || 0
+      }
+    });
+  } catch (error) {
+    console.error("Unified Search Error:", error);
+    return res.status(500).json({ message: "Error performing search", error: error.message });
+  }
+});
+
+// 12. INSTANT SEARCH AUTOCOMPLETE / SUGGESTIONS
+router.get("/search/suggest", async (req, res) => {
+  try {
+    const q = (req.query.q || "").trim();
+    if (!q || q.length < 2) {
+      return res.status(200).json({
+        success: true,
+        suggestions: { users: [], tags: [], titles: [] }
+      });
+    }
+
+    const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const prefixRegex = new RegExp(`^${escapedQuery}`, "i");
+    const anyRegex = new RegExp(escapedQuery, "i");
+
+    const [users, posts] = await Promise.all([
+      User.find({
+        $or: [{ username: prefixRegex }, { name: anyRegex }]
+      })
+        .select("name username profilePicture isVerified")
+        .limit(5)
+        .lean(),
+      Post.find({
+        $or: [{ title: anyRegex }, { tags: prefixRegex }]
+      })
+        .select("title tags mediaType")
+        .limit(8)
+        .lean()
+    ]);
+
+    // Extract unique matching tags
+    const matchedTags = new Set();
+    const cleanQ = q.toLowerCase().replace(/^#/, "");
+    posts.forEach(p => {
+      (p.tags || []).forEach(t => {
+        if (t.toLowerCase().includes(cleanQ)) {
+          matchedTags.add(t.toLowerCase());
+        }
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      query: q,
+      suggestions: {
+        users: (users || []).map(u => ({
+          _id: u._id,
+          name: u.name || u.username,
+          username: u.username,
+          profilePicture: u.profilePicture || "/Fondpeace.jpg",
+          isVerified: !!u.isVerified
+        })),
+        tags: Array.from(matchedTags).slice(0, 6),
+        titles: (posts || []).slice(0, 5).map(p => p.title).filter(Boolean)
+      }
+    });
+  } catch (error) {
+    console.error("Search Suggest Error:", error);
+    return res.status(500).json({ message: "Error fetching suggestions", error: error.message });
+  }
+});
+
+// Alias for trending tags
+router.get("/trending-tags", async (req, res) => {
+  try {
+    const trendingTags = await Post.aggregate([
+      { $match: { tags: { $exists: true, $ne: [] } } },
+      { $unwind: "$tags" },
+      {
+        $project: {
+          tag: {
+            $toLower: {
+              $replaceAll: { input: "$tags", find: "#", replacement: "" }
+            }
+          }
+        }
+      },
+      { $match: { tag: { $ne: "" } } },
+      { $group: { _id: "$tag", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]);
+
+    const formatted = trendingTags.map(item => ({
+      hashtag: `#${item._id}`,
+      name: item._id,
+      postsCount: item.count
+    }));
+
+    return res.status(200).json({
+      success: true,
+      trending: formatted
+    });
+  } catch (error) {
+    console.error("Trending Tags Error:", error);
+    return res.status(500).json({ message: "Error loading trending tags", error: error.message });
+  }
+});
+
+// 13. DYNAMIC OPENGRAPH LINK PREVIEW API
+router.get(["/preview-link", "/preview/link"], async (req, res) => {
+  try {
+    const rawUrl = (req.query.url || "").trim();
+    if (!rawUrl) {
+      return res.status(400).json({ success: false, message: "URL parameter 'url' is required" });
+    }
+
+    const preview = await extractOpenGraph(rawUrl);
+    if (!preview) {
+      return res.status(404).json({ success: false, message: "Could not extract metadata from provided URL" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      preview
+    });
+  } catch (error) {
+    console.error("Preview Link Error:", error);
+    return res.status(500).json({ success: false, message: "Error parsing link preview", error: error.message });
+  }
+});
+
+// 14. DEEP POST ANALYTICS & PERFORMANCE METRICS
+router.get("/analytics/:postId", async (req, res) => {
+  try {
+    const postId = req.params.postId;
+    const post = await Post.findById(postId)
+      .populate("userId", "name username profilePicture isVerified")
+      .lean();
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    const views = post.views || 0;
+    const likesCount = post.likes ? post.likes.length : 0;
+    const commentsCount = post.comments ? post.comments.length : 0;
+    const repostsCount = post.repostsCount || 0;
+    const bookmarksCount = post.bookmarksCount || 0;
+
+    let pollVotes = 0;
+    if (post.poll && post.poll.options) {
+      post.poll.options.forEach(opt => {
+        pollVotes += (opt.votes ? opt.votes.length : 0);
+      });
+    }
+
+    const totalInteractions = likesCount + commentsCount + repostsCount + bookmarksCount + pollVotes;
+    const engagementRate = views > 0 
+      ? `${((totalInteractions / views) * 100).toFixed(2)}%`
+      : (totalInteractions > 0 ? "100.00%" : "0.00%");
+
+    return res.status(200).json({
+      success: true,
+      postId: post._id,
+      title: post.title,
+      creator: post.userId,
+      metrics: {
+        views,
+        likesCount,
+        commentsCount,
+        repostsCount,
+        bookmarksCount,
+        pollVotes,
+        totalInteractions,
+        engagementRate,
+        trendingScore: post.trendingScore || 0
+      },
+      createdAt: post.createdAt
+    });
+  } catch (error) {
+    console.error("Post Analytics Error:", error);
+    return res.status(500).json({ message: "Error generating post analytics", error: error.message });
+  }
+});
 
 module.exports = router;

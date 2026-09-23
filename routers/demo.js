@@ -28,7 +28,7 @@ const r2 = new S3Client({
 const BUCKET = process.env.R2_BUCKET_NAME;
 const BASE_URL = `https://${process.env.R2_PUBLIC_DOMAIN}`;
 
-// ─── Allowed types ──────────────────────────────────────────────────
+// ─── Allowed types & Storage limits (Cloudflare R2 Free Tier Optimization) ───
 const ALLOWED_VIDEO = ["video/mp4", "video/webm", "video/ogg", "video/quicktime"];
 const ALLOWED_IMAGE = [
   "image/png", "image/jpeg", "image/jpg", "image/webp",
@@ -36,9 +36,26 @@ const ALLOWED_IMAGE = [
 ];
 const ALL_ALLOWED = [...ALLOWED_VIDEO, ...ALLOWED_IMAGE];
 
-// Max sizes: 200MB video, 20MB image
-const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+// Max sizes: 50MB video (Shorts & Reels), 15MB raw image (compressed to ~180KB client-side)
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_VIDEO_DURATION_SECONDS = 95; // 90s + 5s buffer
+
+// In-memory rate limiter per user (24-hour sliding window)
+const r2RateLimitMap = new Map();
+function checkR2RateLimit(key, maxRequests = 10, windowMs = 86400000) {
+  const now = Date.now();
+  const record = r2RateLimitMap.get(key);
+  if (!record || now > record.resetTime) {
+    r2RateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
+    return true;
+  }
+  if (record.count >= maxRequests) {
+    return false;
+  }
+  record.count += 1;
+  return true;
+}
 
 // ─── Slug generator ────────────────────────────────────────────────
 function generateSlug(title) {
@@ -66,28 +83,32 @@ router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
 
 // ─────────────────────────────────────────────────────────────────────
 // STEP 1 — Frontend asks for presigned URLs (for video + thumbnail)
-// This route finishes in under 200ms — no timeout possible on Render
 // ─────────────────────────────────────────────────────────────────────
 router.post("/presign", verifyToken, async (req, res) => {
   try {
+    const userId = req.user.UserId;
+
+    // Daily upload limit per user on free tier (Max 8 videos/24h)
+    if (!checkR2RateLimit(`r2_vid_${userId}`, 8, 86400000)) {
+      return res.status(429).json({ error: "Daily video upload limit reached (Max 8 reels per day on free storage). Resets in 24h." });
+    }
+
     const { video, thumbnail } = req.body;
-    // video: { filename, contentType, fileSize }
-    // thumbnail: { contentType, fileSize }  — always image/jpeg from browser canvas
 
     // ── Validate video ──
     if (!video || !ALLOWED_VIDEO.includes(video.contentType)) {
       return res.status(400).json({ error: "Invalid video type. Allowed: mp4, webm, ogg, quicktime" });
     }
     if (video.fileSize > MAX_VIDEO_BYTES) {
-      return res.status(400).json({ error: "Video too large. Max 200MB." });
+      return res.status(400).json({ error: "Video exceeds 50MB maximum limit for FondPeace Shorts & Reels." });
     }
 
     // ── Validate thumbnail ──
     if (!thumbnail || !ALLOWED_IMAGE.includes(thumbnail.contentType)) {
       return res.status(400).json({ error: "Invalid thumbnail type" });
     }
-    if (thumbnail.fileSize > MAX_IMAGE_BYTES) {
-      return res.status(400).json({ error: "Thumbnail too large" });
+    if (thumbnail.fileSize > 2 * 1024 * 1024) {
+      return res.status(400).json({ error: "Thumbnail too large. Max 2MB." });
     }
 
     const id = uuidv4();
@@ -144,13 +165,18 @@ router.post("/presign", verifyToken, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────
 router.post("/presign-image", verifyToken, async (req, res) => {
   try {
+    const userId = req.user.UserId;
+    if (!checkR2RateLimit(`r2_img_${userId}`, 30, 86400000)) {
+      return res.status(429).json({ error: "Daily photo upload limit reached (Max 30 photos per day on free storage). Resets in 24h." });
+    }
+
     const { contentType, fileSize, filename } = req.body;
 
     if (!ALLOWED_IMAGE.includes(contentType)) {
       return res.status(400).json({ error: "Invalid image type" });
     }
     if (fileSize > MAX_IMAGE_BYTES) {
-      return res.status(400).json({ error: "Image too large. Max 20MB." });
+      return res.status(400).json({ error: "Image too large. Max 15MB." });
     }
 
     const id = uuidv4();
@@ -201,23 +227,33 @@ router.post("/confirm", verifyToken, async (req, res) => {
       // image fields (if image upload)
       imageKey,
       imageUrl,
+      poll,
+      linkPreview,
+      location,
     } = req.body;
-
-    if (!title) return res.status(400).json({ error: "Title is required" });
 
     const isVideo = mediaType && mediaType.startsWith("video");
     const isImage = mediaType && mediaType.startsWith("image");
+    const hasMedia = isVideo || isImage;
 
-    if (!isVideo && !isImage) {
-      return res.status(400).json({ error: "Invalid media type" });
+    // Reject video longer than 90s (95s with buffer)
+    if (isVideo && duration > MAX_VIDEO_DURATION_SECONDS) {
+      return res.status(400).json({ error: "Video exceeds 90-second maximum duration for shorts/reels." });
     }
 
+    // A post must have at least text, media, or a poll
+    if (!title?.trim() && !hasMedia && !poll) {
+      return res.status(400).json({ error: "Post must have text content, media, or a poll" });
+    }
+
+    const finalTitle = title?.trim() || (isVideo ? "Video" : isImage ? "Photo" : "Discussion");
+
     // Build slug (unique)
-    let slug = generateSlug(title);
+    let slug = generateSlug(finalTitle);
     let existing = await Post.findOne({ slug });
     let count = 1;
     while (existing) {
-      slug = `${generateSlug(title)}-${count++}`;
+      slug = `${generateSlug(finalTitle)}-${count++}`;
       existing = await Post.findOne({ slug });
     }
 
@@ -228,27 +264,31 @@ router.post("/confirm", verifyToken, async (req, res) => {
       : [];
 
     // Pull hashtags out of title too
-    const titleTags = (title.match(/#\w+/g) || []).map((t) => t.replace("#", ""));
+    const titleTags = (finalTitle.match(/#\w+/g) || []).map((t) => t.replace("#", ""));
     const allTags = [...new Set([...extractedTags, ...titleTags])];
 
-    const mediaUrl = isVideo ? videoUrl : imageUrl;
-    const thumbUrl = isVideo ? thumbnailUrl : (imageUrl || "");
+    const mediaUrl = isVideo ? (videoUrl || "") : (isImage ? (imageUrl || "") : "");
+    const thumbUrl = isVideo ? (thumbnailUrl || "") : (imageUrl || "");
+    const finalMediaType = isVideo ? mediaType : (isImage ? mediaType : "text");
 
     const newPost = new Post({
       userId,
-      title,
+      title: finalTitle,
       slug,
       category: category || "Entertainment",
       tags: allTags,
       media: mediaUrl,
       thumbnail: thumbUrl,
-      mediaType,
+      mediaType: finalMediaType,
       fileSize: fileSize || 0,
       duration: duration || 0,
       resolution: resolution || "",
       durationISO: secondsToISO(duration || 0),
       likes: [],
       comments: [],
+      poll: poll || undefined,
+      linkPreview: linkPreview || undefined,
+      location: location?.trim() || "",
     });
 
     const saved = await newPost.save();

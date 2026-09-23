@@ -21,16 +21,16 @@ const PostSchema = new Schema({
   title: { type: String, default: "" },
   slug: { type: String, unique: true, sparse: true },
   tags: [{ type: String, trim: true }],
-  media: { type: String, required: true },
+  media: { type: String, default: "" },
   thumbnail: { type: String, default: "" },
   medias: {
     type: new Schema({
       public_id: { type: String, default: "" },
-      url: { type: String, required: true },
-      type: { type: String, required: true }
+      url: { type: String, default: "" },
+      type: { type: String, default: "" }
     }, { _id: false })
   },
-  mediaType: { type: String, required: true },
+  mediaType: { type: String, default: "text" },
   category: {
   type: String,
   enum: [
@@ -51,12 +51,44 @@ const PostSchema = new Schema({
   ],
   default: "Entertainment"
 },
+  location: { type: String, default: "" }, // e.g. "Mumbai, India" or "New Delhi"
   trendingScore: { type: Number, default: 0 },
   last24hViews: { type: Number, default: 0 },
   duration: { type: Number, default: 0 },
   views : {type: Number, default: 0},
   likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
-  comments: [CommentSchema],
+  comments: [{
+    CommentText: { type: String, required: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
+    createdAt: { type: Date, default: Date.now },
+    replies: [{
+      userId: { type: Schema.Types.ObjectId, ref: "User" },
+      replyText: { type: String, required: true },
+      likes: [{ type: Schema.Types.ObjectId, ref: "User", default: [] }],
+      createdAt: { type: Date, default: Date.now }
+    }]
+  }],
+  repostOf: { type: Schema.Types.ObjectId, ref: "Post", default: null },
+  repostsCount: { type: Number, default: 0 },
+  bookmarksCount: { type: Number, default: 0 },
+  isPinned: { type: Boolean, default: false },
+  poll: {
+    question: { type: String, default: "" },
+    options: [{
+      optionText: { type: String, required: true },
+      votes: [{ type: Schema.Types.ObjectId, ref: "User" }]
+    }],
+    expiresAt: { type: Date }
+  },
+  linkPreview: {
+    url: { type: String, default: "" },
+    title: { type: String, default: "" },
+    description: { type: String, default: "" },
+    image: { type: String, default: "" },
+    siteName: { type: String, default: "" },
+    favicon: { type: String, default: "" }
+  },
 }, { timestamps: true });
 
 module.exports = model("Post", PostSchema);

@@ -1,3 +1,5 @@
+const bufferModule = require('buffer');
+if (!bufferModule.SlowBuffer) { bufferModule.SlowBuffer = bufferModule.Buffer; }
 const express = require("express");
 const http = require("http");
 const mongoose = require("mongoose");
@@ -13,6 +15,7 @@ const Demo = require("./routers/demo");
 const analyticsRoutes = require("./routers/analytics");
 const pwaAnalyticsRoute = require("./routers/pwaAnalytics");
 const reminderRoutes = require("./routers/reminder");
+const notificationRoutes = require("./routers/notification");
 
 
 const app = express();
@@ -52,6 +55,7 @@ app.use("/demo", Demo);
 app.use("/analytics", analyticsRoutes);
 app.use("/api/pwa", pwaAnalyticsRoute);
 app.use("/reminder", reminderRoutes);
+app.use("/notification", notificationRoutes);
 
 
 // ================= START SERVER =================
@@ -126,3 +130,4 @@ server.listen(PORT, () => {
 
 
 // app.listen(4000, console.log("Running on Demo 4000"));
+

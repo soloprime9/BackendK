@@ -20,12 +20,30 @@ const User = require("../models/User");
 const Notification = require("../models/Notification");
 const Report = require("../models/Report");
 
+const jwt = require("jsonwebtoken");
+
 // Helper to safely emit real-time events without crashing if socket is absent
 function emitRealtimeEvent(event, data) {
   try {
     const io = getIO();
     if (io) io.emit(event, data);
   } catch (_) {}
+}
+
+// Helper: Extract authenticated userId from token headers if present
+function extractUserId(req) {
+  const token =
+    req.headers["x-auth-token"] ||
+    (req.headers.authorization?.startsWith("Bearer ")
+      ? req.headers.authorization.slice(7)
+      : null);
+  if (!token) return null;
+  try {
+    const decoded = jwt.decode(token);
+    return decoded?.UserId || decoded?.id || decoded?.userId || null;
+  } catch {
+    return null;
+  }
 }
 
 // Helper to create notification while respecting recipient's notification preferences
@@ -1058,122 +1076,132 @@ router.delete("/delete/:postId", async (req, res) => {
 })
 
 
-router.get('/shorts', async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 5;
-  const skip = (page - 1) * limit;
-
+/* =========================================================================
+   SHORTS & REELS RECOMMENDATION FEED (DEDUPLICATED & DIVERSE)
+   Endpoints: GET /shorts, GET /shorts/feed
+   Supports:
+   - Client session exclusion list (seen IDs)
+   - Server-side user watch history exclusion (last 7 days)
+   - Creator diversity constraint (no consecutive videos from same creator)
+   - Full creator profile & verification badge population
+   - Graceful fallback when all unseen videos are exhausted
+========================================================================= */
+router.get(['/shorts', '/shorts/feed'], async (req, res) => {
   try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 6, 20);
 
-    const excludeIds = req.query.exclude
-      ? req.query.exclude.split(',')
-      : [];
+    // 1. Parse client-provided exclude IDs (Session Seen Cache)
+    let rawExclude = [];
+    if (req.query.exclude) {
+      rawExclude = Array.isArray(req.query.exclude)
+        ? req.query.exclude
+        : req.query.exclude.split(',');
+    }
 
+    const validClientExclude = rawExclude
+      .map((id) => (typeof id === 'string' ? id.trim() : ''))
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    // 2. Check if user is authenticated to fetch their server-side watch history (last 7 days)
+    const userId = extractUserId(req);
+    let userWatchedIds = [];
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const userDoc = await User.findById(userId, { watchedShorts: 1 }).lean();
+      if (userDoc?.watchedShorts?.length) {
+        userWatchedIds = userDoc.watchedShorts
+          .filter((w) => w.postId && new Date(w.watchedAt) >= sevenDaysAgo)
+          .map((w) => new mongoose.Types.ObjectId(w.postId));
+      }
+    }
+
+    // Combine all excluded IDs uniquely
+    const allExcludeMap = new Map();
+    [...validClientExclude, ...userWatchedIds].forEach((id) => {
+      allExcludeMap.set(id.toString(), id);
+    });
+    const allExcludeObjectIds = Array.from(allExcludeMap.values());
+
+    // 3. Video Match Filter (supports new and legacy video media)
     const videoFilter = {
-      mediaType: "video"
+      $or: [
+        { mediaType: { $regex: /video/i } },
+        { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+      ],
     };
 
-    const query = {
-      _id: { $nin: excludeIds },
-      ...videoFilter
+    // Primary Query: Exclude all seen videos
+    let query = {
+      ...videoFilter,
+      ...(allExcludeObjectIds.length ? { _id: { $nin: allExcludeObjectIds } } : {}),
     };
 
-    const total = await Post.countDocuments(query);
+    let totalAvailable = await Post.countDocuments(query);
+    let isFallback = false;
 
-    const mostViewed = await Post.find(query)
-      .sort({ views: -1 })
-      .limit(10)
-      .populate('userId', 'username');
+    // 4. Fallback Pool: If user has watched everything available, relax exclusion
+    // only excluding the last 3 client videos so they don't see the same video back-to-back
+    if (totalAvailable === 0 && allExcludeObjectIds.length > 0) {
+      isFallback = true;
+      const immediateExclude = validClientExclude.slice(-3);
+      query = {
+        ...videoFilter,
+        ...(immediateExclude.length ? { _id: { $nin: immediateExclude } } : {}),
+      };
+      totalAvailable = await Post.countDocuments(query);
+    }
 
-    const latest = await Post.find(query)
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .populate('userId', 'username');
+    // 5. Fetch Candidate Pool (Mix of High Engagement + Fresh)
+    const candidates = await Post.find(query)
+      .sort({ views: -1, last24hViews: -1, createdAt: -1 })
+      .limit(limit * 3)
+      .populate("userId", "username name profilePicture profilePic avatar isVerified")
+      .populate({
+        path: "comments.userId",
+        select: "username name profilePicture profilePic avatar isVerified",
+      })
+      .lean();
 
-    // ✅ FIX: same filter + excludeIds in aggregation
-    const random = await Post.aggregate([
-      {
-        $match: {
-          _id: { $nin: excludeIds.map(id => new mongoose.Types.ObjectId(id)) },
-          mediaType: "video"
-        }
-      },
-      { $sample: { size: 10 } }
-    ]);
+    // 6. Creator Diversity Shuffle (no consecutive videos from same creator)
+    const diversified = [];
+    const pool = [...candidates];
+    // Light shuffle to prevent deterministic ordering
+    pool.sort(() => Math.random() - 0.45);
 
-    const randomPopulated = await Post.populate(random, {
-      path: 'userId',
-      select: 'username'
-    });
+    let lastCreatorId = null;
+    while (pool.length > 0 && diversified.length < limit) {
+      let nextIndex = pool.findIndex((p) => {
+        const cId = p.userId?._id?.toString() || p.userId?.toString();
+        return !lastCreatorId || cId !== lastCreatorId;
+      });
 
-    let allVideos = [...mostViewed, ...latest, ...randomPopulated];
+      if (nextIndex === -1) {
+        nextIndex = 0;
+      }
 
-    // ✅ duplicate remove
-    const seen = new Set();
-    allVideos = allVideos.filter(v => {
-      const vid = v._id.toString();
-      if (seen.has(vid)) return false;
-      seen.add(vid);
-      return true;
-    });
+      const selected = pool.splice(nextIndex, 1)[0];
+      diversified.push(selected);
+      lastCreatorId = selected.userId?._id?.toString() || selected.userId?.toString();
+    }
 
-    // ✅ shuffle
-    allVideos.sort(() => Math.random() - 0.5);
-
-    const videos = allVideos.slice(skip, skip + limit);
-
-    const populatedVideos = await Post.populate(videos, [
-      { path: 'comments', select: 'userId' },
-      { path: 'likes', select: 'userId' }
-    ]);
-
-    res.status(200).json({
+    return res.status(200).json({
       page,
       limit,
-      total,
-      totalPages: Math.ceil(total / limit), // ✅ FIXED
-      videos: populatedVideos
+      total: totalAvailable,
+      hasMore: totalAvailable > diversified.length,
+      isFallback,
+      videos: diversified,
     });
-
   } catch (error) {
-    console.error('Error fetching shorts:', error);
-    res.status(500).json({ message: 'Server error', error });
+    console.error("Error fetching shorts feed:", error);
+    return res.status(500).json({
+      message: "Server error fetching shorts feed",
+      error: error.message,
+    });
   }
 });
-
-
-// router.get('/shorts', async (req, res) => {
-//   const page = parseInt(req.query.page) || 1;
-//   const limit = parseInt(req.query.limit) || 5;
-//   const skip = (page - 1) * limit;
-
-//   try {
-//     const videoExtensions = /\.(mp4|mov|webm|mkv|avi|flv|m4v)$/i;
-
-//     const query = { media: { $regex: videoExtensions } };
-//     const total = await Post.countDocuments(query);
-
-//     const videos = await Post.find(query)
-//       .sort({ createdAt: -1 })
-//       .skip(skip)
-//       .limit(limit)
-//       .populate('userId', 'username')
-//       .populate('comments', 'userId')
-//       .populate('likes', 'userId');
-
-//     res.status(200).json({
-//       page,
-//       limit,
-//       total,
-//       totalPages: Math.ceil(total / limit),
-//       videos,
-//     });
-
-//   } catch (error) {
-//     console.error('Error fetching shorts:', error);
-//     res.status(500).json({ message: 'Server error', error });
-//   }
-// });
 
 
 

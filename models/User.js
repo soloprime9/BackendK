@@ -53,6 +53,10 @@ const UserSchema = Schema({
       notifyFollows: { type: Boolean, default: true }
     },
     posts: [{ type: Schema.Types.ObjectId, ref: "Post" }],
+    watchedShorts: [{
+      postId: { type: Schema.Types.ObjectId, ref: "Post" },
+      watchedAt: { type: Date, default: Date.now },
+    }],
 }, { timestamps: true });
 
 UserSchema.pre("save", function(next) {

@@ -399,12 +399,51 @@ router.get("/profile/:username", verifyToken, async (req, res) => {
         }
 
         const OwnerId = (loggedinUser && user._id) ? user._id.toString() === loggedinUser.toString() : false;
-        const posts = await Post.find({ userId: user._id }).populate("userId", "username");
+
+        const userPostsQuery = {
+            $or: [
+                { userId: user._id },
+                { userId: user._id.toString() }
+            ]
+        };
+
+        const [posts, likedPosts, discussionPosts] = await Promise.all([
+            Post.find(userPostsQuery)
+                .sort({ createdAt: -1 })
+                .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline"),
+            Post.find({
+                $or: [{ likes: user._id }, { likes: user._id.toString() }]
+            })
+                .sort({ createdAt: -1 })
+                .limit(60)
+                .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline"),
+            Post.find({
+                $or: [
+                    {
+                        ...userPostsQuery,
+                        $or: [
+                            { mediaType: { $in: ["text", "discussion"] } },
+                            { media: "" },
+                            { media: null },
+                            { media: { $exists: false } },
+                            { "poll.question": { $exists: true, $ne: "" } },
+                            { "comments.0": { $exists: true } }
+                        ]
+                    },
+                    { "comments.userId": user._id }
+                ]
+            })
+                .sort({ createdAt: -1 })
+                .limit(60)
+                .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
+        ]);
 
         res.status(200).json({
             Profile: {
                 user: user,
                 posts,
+                likedPosts,
+                discussionPosts,
                 OwnerId
             }
         });
@@ -441,18 +480,111 @@ router.get("/profile-public/:username", async (req, res) => {
           } catch (_) {}
         }
 
-        const posts = await Post.find({ userId: user._id }).populate("userId", "username");
+        const userPostsQuery = {
+            $or: [
+                { userId: user._id },
+                { userId: user._id.toString() }
+            ]
+        };
+
+        const [posts, likedPosts, discussionPosts] = await Promise.all([
+            Post.find(userPostsQuery)
+                .sort({ createdAt: -1 })
+                .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline"),
+            Post.find({
+                $or: [{ likes: user._id }, { likes: user._id.toString() }]
+            })
+                .sort({ createdAt: -1 })
+                .limit(60)
+                .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline"),
+            Post.find({
+                $or: [
+                    {
+                        ...userPostsQuery,
+                        $or: [
+                            { mediaType: { $in: ["text", "discussion"] } },
+                            { media: "" },
+                            { media: null },
+                            { media: { $exists: false } },
+                            { "poll.question": { $exists: true, $ne: "" } },
+                            { "comments.0": { $exists: true } }
+                        ]
+                    },
+                    { "comments.userId": user._id }
+                ]
+            })
+                .sort({ createdAt: -1 })
+                .limit(60)
+                .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
+        ]);
 
         res.status(200).json({
             Profile: {
                 user: user,
                 posts,
+                likedPosts,
+                discussionPosts,
                 OwnerId
             }
         });
     } catch (error) {
         console.error("Public Profile Error:", error);
         res.status(500).json({ message: "Server Error", error: error.message });
+    }
+});
+
+// 5B. PROFILE LIKED POSTS ENDPOINT
+router.get(["/profile/:username/liked", "/profile-public/:username/liked"], async (req, res) => {
+    try {
+        const query = buildUserLookupQuery(req.params.username);
+        if (!query) return res.status(404).json({ message: "User not found" });
+        const user = await User.findOne(query).select("_id username name");
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const likedPosts = await Post.find({
+            $or: [{ likes: user._id }, { likes: user._id.toString() }]
+        })
+            .sort({ createdAt: -1 })
+            .limit(80)
+            .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline");
+
+        return res.status(200).json({ success: true, posts: likedPosts });
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
+    }
+});
+
+// 5C. PROFILE DISCUSSION POSTS ENDPOINT
+router.get(["/profile/:username/discussions", "/profile-public/:username/discussions"], async (req, res) => {
+    try {
+        const query = buildUserLookupQuery(req.params.username);
+        if (!query) return res.status(404).json({ message: "User not found" });
+        const user = await User.findOne(query).select("_id username name");
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const discussionPosts = await Post.find({
+            $or: [
+                {
+                    userId: user._id,
+                    $or: [
+                        { mediaType: { $in: ["text", "discussion"] } },
+                        { media: "" },
+                        { media: null },
+                        { media: { $exists: false } },
+                        { "poll.question": { $exists: true, $ne: "" } },
+                        { "comments.0": { $exists: true } }
+                    ]
+                },
+                { "comments.userId": user._id }
+            ]
+        })
+            .sort({ createdAt: -1 })
+            .limit(80)
+            .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline");
+
+        return res.status(200).json({ success: true, posts: discussionPosts });
+    } catch (err) {
+        return res.status(500).json({ message: err.message });
     }
 });
 

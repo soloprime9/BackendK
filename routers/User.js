@@ -82,16 +82,27 @@ router.get("/suggested-creators", async (req, res) => {
     const creators = await User.find({
       username: { $exists: true, $ne: "" }
     })
-      .select("username name profilePic isVerified bio category Followers tagline")
+      .select("username name profilePicture profilePic avatar isVerified bio category Followers tagline")
       .limit(25)
       .lean();
 
+    // Normalize avatar across all field naming variations
+    const formatted = creators.map((c) => {
+      const pic = c.profilePicture || c.profilePic || c.avatar || "/Fondpeace.jpg";
+      return {
+        ...c,
+        profilePicture: pic,
+        profilePic: pic,
+        avatar: pic
+      };
+    });
+
     // Sort by most followers / popularity
-    creators.sort((a, b) => (b.Followers?.length || 0) - (a.Followers?.length || 0));
+    formatted.sort((a, b) => (b.Followers?.length || 0) - (a.Followers?.length || 0));
 
     res.status(200).json({
       success: true,
-      creators: creators.slice(0, 10),
+      creators: formatted.slice(0, 10),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: "Could not fetch suggested creators" });
@@ -708,11 +719,16 @@ router.put('/profile/update', verifyToken, async (req, res) => {
 
     // 7. Handle Profile Picture & Cover Image (SAFELY PRESERVE EXISTING IMAGES)
     // Never overwrite an existing image with empty string or null unless explicitly removed
-    if (profilePicture !== undefined) {
-      if (typeof profilePicture === "string" && profilePicture.trim().length > 0) {
-        user.profilePicture = profilePicture.trim();
+    const incomingPic = profilePicture !== undefined ? profilePicture : (req.body.profilePic !== undefined ? req.body.profilePic : req.body.avatar);
+    if (incomingPic !== undefined) {
+      if (typeof incomingPic === "string" && incomingPic.trim().length > 0) {
+        user.profilePicture = incomingPic.trim();
+        user.profilePic = user.profilePicture;
+        user.avatar = user.profilePicture;
       } else if (req.body.removeProfilePicture === true) {
         user.profilePicture = "/Fondpeace.jpg";
+        user.profilePic = "/Fondpeace.jpg";
+        user.avatar = "/Fondpeace.jpg";
       }
     }
 

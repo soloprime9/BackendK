@@ -295,10 +295,10 @@ router.get("/related/mango/getall", async (req, res) => {
       .sort({ createdAt: -1 }) // Latest first
       .skip(skip)
       .limit(limit)
-      .populate("userId", "username profilePic")
+      .populate("userId", "username name profilePicture profilePic avatar isVerified")
       .populate({
         path: "comments.userId",
-        select: "username profilePic"
+        select: "username name profilePicture profilePic avatar isVerified"
       });
 
     return res.status(200).json(posts);
@@ -831,19 +831,19 @@ router.get("/mango/getall", async (req, res) => {
           .sort(sortOptions)
           .skip(halfSkip)
           .limit(halfLimit)
-          .populate("userId", "username name profilePic profilePicture isVerified isEmailVerified category tagline")
+          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
           .populate({
             path: "comments.userId",
-            select: "username name profilePic profilePicture isVerified isEmailVerified"
+            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
           }),
         Post.find(nonVideoFilter)
           .sort(sortOptions)
           .skip(halfSkip)
           .limit(halfLimit)
-          .populate("userId", "username name profilePic profilePicture isVerified isEmailVerified category tagline")
+          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
           .populate({
             path: "comments.userId",
-            select: "username name profilePic profilePicture isVerified isEmailVerified"
+            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
           })
       ]);
 
@@ -861,10 +861,10 @@ router.get("/mango/getall", async (req, res) => {
       .sort(sortOptions)
       .skip(skip)
       .limit(limit)
-      .populate("userId", "username name profilePic profilePicture isVerified isEmailVerified category tagline")
+      .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
       .populate({
         path: "comments.userId",
-        select: "username name profilePic profilePicture isVerified isEmailVerified"
+        select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
       });
 
     return res.status(200).json(posts);

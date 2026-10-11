@@ -15,6 +15,8 @@ const UserSchema = Schema({
     ipAddress: { type: String, default: "" },
     bio: { type: String, default: "Hey there! I am using FondPeace." },
     profilePicture: { type: String, default: "/Fondpeace.jpg" },
+    profilePic: { type: String, default: "/Fondpeace.jpg" },
+    avatar: { type: String, default: "/Fondpeace.jpg" },
     coverImage: { type: String, default: "" },
     website: { type: String, default: "" },
     isVerified: { type: Boolean, default: false }, // Blue verification tick
@@ -52,6 +54,20 @@ const UserSchema = Schema({
     },
     posts: [{ type: Schema.Types.ObjectId, ref: "Post" }],
 }, { timestamps: true });
+
+UserSchema.pre("save", function(next) {
+  if (this.profilePicture) {
+    this.profilePic = this.profilePicture;
+    this.avatar = this.profilePicture;
+  } else if (this.profilePic) {
+    this.profilePicture = this.profilePic;
+    this.avatar = this.profilePic;
+  } else if (this.avatar) {
+    this.profilePicture = this.avatar;
+    this.profilePic = this.avatar;
+  }
+  next();
+});
 
 const User = model("User", UserSchema);
   

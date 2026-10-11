@@ -11,6 +11,7 @@ const UserSchema = Schema({
     phone: { type: String, default: "", sparse: true }, // Optional phone for frictionless signup
     country: { type: String, default: "" },
     city: { type: String, default: "" },
+    location: { type: String, default: "" },
     ipAddress: { type: String, default: "" },
     bio: { type: String, default: "Hey there! I am using FondPeace." },
     profilePicture: { type: String, default: "/Fondpeace.jpg" },

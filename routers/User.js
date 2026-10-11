@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const dotenv = require("dotenv");
 const jwt = require("jsonwebtoken");
@@ -17,7 +18,52 @@ function emitRealtimeEvent(event, data) {
   } catch (_) {}
 }
 
+// Case-insensitive, handle-clean, and ObjectId-safe User lookup query builder
+function buildUserLookupQuery(rawIdentifier) {
+  if (!rawIdentifier) return null;
+  const clean = String(rawIdentifier).trim().replace(/^@/, "");
+  if (!clean) return null;
+
+  const isObjectId = mongoose.Types.ObjectId.isValid(clean) && clean.length === 24;
+  const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  if (isObjectId) {
+    return {
+      $or: [
+        { _id: new mongoose.Types.ObjectId(clean) },
+        { username: clean.toLowerCase() },
+        { username: new RegExp(`^${escaped}$`, "i") }
+      ]
+    };
+  }
+
+  return {
+    $or: [
+      { username: clean.toLowerCase() },
+      { username: new RegExp(`^${escaped}$`, "i") }
+    ]
+  };
+}
+
 dotenv.config();
+
+// 0. GET CURRENT AUTHENTICATED USER
+router.get("/me", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Invalid token payload" });
+    }
+    const user = await User.findById(userId).select("-password -phone -ipAddress");
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    return res.status(200).json({ success: true, user });
+  } catch (error) {
+    console.error("Fetch Me Error:", error);
+    return res.status(500).json({ success: false, message: "Server Error", error: error.message });
+  }
+});
 
 // 1. GET ALL USERS (Sanitized - never expose passwords)
 router.get("/mango/getall", async (req, res) => {
@@ -330,14 +376,18 @@ router.post("/google-auth", async (req, res) => {
 // 4. AUTHENTICATED PROFILE
 router.get("/profile/:username", verifyToken, async (req, res) => {
     try {
-        const loggedinUser = req.user.UserId;
-        const username = req.params.username;
-        const user = await User.findOne({ username }).select("-password");
-        if (!user) { 
-            return res.status(404).json("user not found");
+        const loggedinUser = req.user?.UserId || req.user?.id || req.user?._id;
+        const query = buildUserLookupQuery(req.params.username);
+        if (!query) {
+            return res.status(404).json({ message: "User not found" });
         }
 
-        const OwnerId = user._id.toString() === loggedinUser.toString();
+        const user = await User.findOne(query).select("-password");
+        if (!user) { 
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        const OwnerId = (loggedinUser && user._id) ? user._id.toString() === loggedinUser.toString() : false;
         const posts = await Post.find({ userId: user._id }).populate("userId", "username");
 
         res.status(200).json({
@@ -349,17 +399,35 @@ router.get("/profile/:username", verifyToken, async (req, res) => {
         });
     } catch (error) {
         console.error("Auth Profile Error:", error);
-        res.status(500).json({ message: "Server Error" });
+        res.status(500).json({ message: "Server Error", error: error.message });
     }
 });
 
 // 5. PUBLIC PROFILE (Safe - excludes password, phone, ipAddress)
 router.get("/profile-public/:username", async (req, res) => {
     try {
-        const username = req.params.username;
-        const user = await User.findOne({ username }).select("-password -phone -ipAddress");
+        const query = buildUserLookupQuery(req.params.username);
+        if (!query) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        const user = await User.findOne(query).select("-password -phone -ipAddress");
         if (!user) { 
-            return res.status(404).json("user not found");
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        let OwnerId = false;
+        const authHeader = req.header("authorization") || req.header("x-auth-token");
+        if (authHeader) {
+          try {
+            const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+            const secret = process.env.JWT_SECRET || "fondpeace_jwt_secret_key_2026";
+            const decoded = jwt.verify(token, secret);
+            const loggedinId = decoded?.UserId || decoded?.id || decoded?._id;
+            if (loggedinId && user._id.toString() === loggedinId.toString()) {
+              OwnerId = true;
+            }
+          } catch (_) {}
         }
 
         const posts = await Post.find({ userId: user._id }).populate("userId", "username");
@@ -367,12 +435,13 @@ router.get("/profile-public/:username", async (req, res) => {
         res.status(200).json({
             Profile: {
                 user: user,
-                posts
+                posts,
+                OwnerId
             }
         });
     } catch (error) {
         console.error("Public Profile Error:", error);
-        res.status(500).json({ message: "Server Error" });
+        res.status(500).json({ message: "Server Error", error: error.message });
     }
 });
 
@@ -543,39 +612,170 @@ router.post('/suggest-usernames', async (req, res) => {
   }
 });
 
-// 11. PROFILE UPDATE (Edit Name, Bio, Avatar, Banner, Website, Links)
+// 11. PROFILE UPDATE (Edit Name, Username, Bio, Tagline, Category, Location, Avatar, Banner, Website, Social Links)
 router.put('/profile/update', verifyToken, async (req, res) => {
   try {
-    const userId = req.user.UserId;
-    const { name, bio, website, profilePicture, coverImage, city, country } = req.body;
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized: Invalid token payload" });
+    }
+
+    const {
+      name,
+      username,
+      bio,
+      tagline,
+      category,
+      location,
+      city,
+      country,
+      website,
+      profilePicture,
+      coverImage,
+      socialLinks,
+      pronouns,
+      accountType
+    } = req.body;
 
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (name !== undefined) user.name = name.trim();
-    if (bio !== undefined) user.bio = bio.trim();
-    if (website !== undefined) user.website = website.trim();
-    if (profilePicture !== undefined) user.profilePicture = profilePicture.trim();
-    if (coverImage !== undefined) user.coverImage = coverImage.trim();
-    if (city !== undefined) user.city = city.trim();
-    if (country !== undefined) user.country = country.trim();
+    // 1. Handle Username Update (if requested & changed)
+    if (username !== undefined && typeof username === "string") {
+      const cleanUsername = username.trim().replace(/^@/, "").toLowerCase();
+      if (cleanUsername && cleanUsername !== user.username) {
+        // Validate handle format
+        if (!/^[a-zA-Z0-9._]{3,30}$/.test(cleanUsername)) {
+          return res.status(400).json({
+            message: "Username must be 3-30 characters (letters, numbers, underscores, and dots only)"
+          });
+        }
+        // Ensure uniqueness
+        const conflict = await User.findOne({ username: cleanUsername, _id: { $ne: user._id } });
+        if (conflict) {
+          const suggestions = await generateUniqueSuggestions(cleanUsername);
+          return res.status(409).json({
+            message: "Username is already taken by another account",
+            suggestions
+          });
+        }
+        user.username = cleanUsername;
+      }
+    }
+
+    // 2. Handle Name
+    if (name !== undefined && typeof name === "string") {
+      const cleanName = name.trim();
+      if (cleanName) user.name = cleanName;
+    }
+
+    // 3. Handle Bio & Tagline
+    if (bio !== undefined && typeof bio === "string") {
+      user.bio = bio.trim();
+    }
+    if (tagline !== undefined && typeof tagline === "string") {
+      user.tagline = tagline.trim();
+    }
+
+    // 4. Handle Category
+    if (category !== undefined && typeof category === "string") {
+      user.category = category.trim();
+    }
+
+    // 5. Handle Location / City / Country
+    if (location !== undefined && typeof location === "string") {
+      user.location = location.trim();
+      // If city and country aren't explicitly provided, parse location
+      if (!city && !country && user.location.includes(",")) {
+        const parts = user.location.split(",").map(p => p.trim());
+        if (parts[0]) user.city = parts[0];
+        if (parts[1]) user.country = parts.slice(1).join(", ");
+      }
+    }
+    if (city !== undefined && typeof city === "string") {
+      user.city = city.trim();
+    }
+    if (country !== undefined && typeof country === "string") {
+      user.country = country.trim();
+    }
+
+    // 6. Handle Website
+    if (website !== undefined && typeof website === "string") {
+      user.website = website.trim();
+    }
+
+    // 7. Handle Profile Picture & Cover Image (SAFELY PRESERVE EXISTING IMAGES)
+    // Never overwrite an existing image with empty string or null unless explicitly removed
+    if (profilePicture !== undefined) {
+      if (typeof profilePicture === "string" && profilePicture.trim().length > 0) {
+        user.profilePicture = profilePicture.trim();
+      } else if (req.body.removeProfilePicture === true) {
+        user.profilePicture = "/Fondpeace.jpg";
+      }
+    }
+
+    if (coverImage !== undefined) {
+      if (typeof coverImage === "string" && coverImage.trim().length > 0) {
+        user.coverImage = coverImage.trim();
+      } else if (req.body.removeCoverImage === true) {
+        user.coverImage = "";
+      }
+    }
+
+    // 8. Handle Social Links
+    if (socialLinks && typeof socialLinks === "object") {
+      user.socialLinks = {
+        instagram: socialLinks.instagram !== undefined ? String(socialLinks.instagram).trim() : (user.socialLinks?.instagram || ""),
+        twitter: socialLinks.twitter !== undefined ? String(socialLinks.twitter).trim() : (user.socialLinks?.twitter || ""),
+        youtube: socialLinks.youtube !== undefined ? String(socialLinks.youtube).trim() : (user.socialLinks?.youtube || ""),
+        github: socialLinks.github !== undefined ? String(socialLinks.github).trim() : (user.socialLinks?.github || ""),
+        linkedin: socialLinks.linkedin !== undefined ? String(socialLinks.linkedin).trim() : (user.socialLinks?.linkedin || "")
+      };
+    }
+
+    // 9. Optional Pronouns & Account Type
+    if (pronouns !== undefined && typeof pronouns === "string") {
+      user.pronouns = pronouns.trim();
+    }
+    if (accountType !== undefined && ["viewer", "creator", "brand"].includes(accountType)) {
+      user.accountType = accountType;
+    }
 
     await user.save();
+
+    // 10. Generate Fresh Token so session stays active
+    const secret = process.env.JWT_SECRET || "fondpeace_jwt_secret_key_2026";
+    const freshToken = jwt.sign({ UserId: user._id }, secret, { expiresIn: "30d" });
 
     const sanitizedUser = user.toObject();
     delete sanitizedUser.password;
     delete sanitizedUser.phone;
     delete sanitizedUser.ipAddress;
 
+    // Real-time broadcast so open tabs update
+    emitRealtimeEvent("user_profile_updated", {
+      userId: user._id,
+      username: user.username,
+      name: user.name,
+      profilePicture: user.profilePicture,
+      coverImage: user.coverImage,
+      tagline: user.tagline,
+      bio: user.bio,
+      category: user.category,
+      location: user.location,
+      socialLinks: user.socialLinks
+    });
+
     return res.status(200).json({
-      message: "Profile updated successfully!",
+      message: "Profile updated successfully! ✨",
+      token: freshToken,
       user: sanitizedUser
     });
   } catch (error) {
     console.error("Profile Update Error:", error);
-    res.status(500).json({ message: "Server error updating profile" });
+    res.status(500).json({ message: "Server error updating profile", error: error.message });
   }
 });
 

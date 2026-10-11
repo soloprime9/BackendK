@@ -29,12 +29,18 @@ app.set("trust proxy", 1);
 // ================= MIDDLEWARE =================
 
 app.use(cors({
-  origin: [
-    "https://computer-xrfg.vercel.app",
-    "https://www.fondpeace.com",
-    "https://fondpeace.com",
-    "http://localhost:3000"
-  ],
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (
+      origin.includes("localhost") ||
+      origin.includes("127.0.0.1") ||
+      origin.includes("vercel.app") ||
+      origin.includes("fondpeace.com")
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
   credentials: true
 }));
 

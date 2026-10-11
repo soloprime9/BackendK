@@ -6,7 +6,10 @@ const verifyToken = require("../middleware/verifyToken");
 // 1. GET NOTIFICATIONS FOR LOGGED-IN USER (Supports Tabs: all, mentions, unread)
 router.get("/", verifyToken, async (req, res) => {
   try {
-    const userId = req.user.UserId;
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Invalid token payload" });
+    }
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
@@ -46,10 +49,13 @@ router.get("/", verifyToken, async (req, res) => {
   }
 });
 
-// 2. MARK ALL OR SPECIFIC NOTIFICATIONS AS READ
-router.put("/mark-read", verifyToken, async (req, res) => {
+// 2. MARK ALL OR SPECIFIC NOTIFICATIONS AS READ (Supports PUT and POST)
+const handleMarkRead = async (req, res) => {
   try {
-    const userId = req.user.UserId;
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Invalid token" });
+    }
     const { notificationId } = req.body;
 
     if (notificationId) {
@@ -66,20 +72,29 @@ router.put("/mark-read", verifyToken, async (req, res) => {
       );
     }
 
+    const unreadCount = await Notification.countDocuments({ recipient: userId, read: false });
+
     return res.status(200).json({
       success: true,
+      unreadCount,
       message: "Notifications marked as read"
     });
   } catch (error) {
     console.error("Mark Read Error:", error);
     return res.status(500).json({ message: "Error updating notification status", error: error.message });
   }
-});
+};
+
+router.put("/mark-read", verifyToken, handleMarkRead);
+router.post("/mark-read", verifyToken, handleMarkRead);
 
 // 3. DELETE NOTIFICATION
 router.delete("/:id", verifyToken, async (req, res) => {
   try {
-    const userId = req.user.UserId;
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Invalid token payload" });
+    }
     const notificationId = req.params.id;
 
     const deleted = await Notification.findOneAndDelete({

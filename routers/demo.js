@@ -165,7 +165,10 @@ router.post("/presign", verifyToken, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────
 router.post("/presign-image", verifyToken, async (req, res) => {
   try {
-    const userId = req.user.UserId;
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized: Invalid token payload" });
+    }
     if (!checkR2RateLimit(`r2_img_${userId}`, 30, 86400000)) {
       return res.status(429).json({ error: "Daily photo upload limit reached (Max 30 photos per day on free storage). Resets in 24h." });
     }
@@ -210,7 +213,10 @@ router.post("/presign-image", verifyToken, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────
 router.post("/confirm", verifyToken, async (req, res) => {
   try {
-    const userId = req.user.UserId;
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized: Invalid token payload" });
+    }
     const {
       title,
       category,

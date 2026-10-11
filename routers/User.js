@@ -195,7 +195,11 @@ router.post('/add', async (req, res) => {
     
     // Auto-login token: User doesn't need to re-login right after registration!
     const secret = process.env.JWT_SECRET || "fondpeace_jwt_secret_key_2026";
-    const token = jwt.sign({ UserId: savedUser._id }, secret, { expiresIn: "30d" });
+    const token = jwt.sign(
+      { UserId: savedUser._id, id: savedUser._id, username: savedUser.username },
+      secret,
+      { expiresIn: "30d" }
+    );
 
     const userResponse = savedUser.toObject();
     delete userResponse.password;
@@ -895,7 +899,11 @@ router.put('/profile/update', verifyToken, async (req, res) => {
 
     // 10. Generate Fresh Token so session stays active
     const secret = process.env.JWT_SECRET || "fondpeace_jwt_secret_key_2026";
-    const freshToken = jwt.sign({ UserId: user._id }, secret, { expiresIn: "30d" });
+    const freshToken = jwt.sign(
+      { UserId: user._id, id: user._id, username: user.username },
+      secret,
+      { expiresIn: "30d" }
+    );
 
     const sanitizedUser = user.toObject();
     delete sanitizedUser.password;

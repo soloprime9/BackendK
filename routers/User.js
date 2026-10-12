@@ -718,6 +718,13 @@ router.post("/follow/:userId", verifyToken, async (req, res) => {
             });
         }
 
+        emitRealtimeEvent("user_follow_update", {
+            targetUserId: targetUserId.toString(),
+            followerUserId: loggedinUserId.toString(),
+            isFollowing: !isFollowing,
+            followersCount: targetUser.Followers.length
+        });
+
         const sanitizedTarget = targetUser.toObject();
         delete sanitizedTarget.password;
         delete sanitizedTarget.phone;

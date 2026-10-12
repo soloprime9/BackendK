@@ -729,6 +729,13 @@ router.post("/like/:postId", verifyToken, async (req, res) => {
 
     await like.save();
 
+    emitRealtimeEvent("post_like_update", {
+      postId: like._id,
+      likesCount: like.likes.length,
+      likes: like.likes,
+      userId: UserId
+    });
+
     return res.status(200).json({ likes: like.likes });
   } catch (error) {
     console.log("LIKE ERROR:", error);
@@ -1181,7 +1188,7 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
     const candidates = await Post.find(query)
       .sort(sortMode)
       .limit(limit * 3)
-      .populate("userId", "username name profilePicture profilePic avatar isVerified")
+      .populate("userId", "username name profilePicture profilePic avatar isVerified Followers")
       .populate({
         path: "comments.userId",
         select: "username name profilePicture profilePic avatar isVerified",
@@ -1414,7 +1421,29 @@ router.post("/comment/:postId", verifyToken, async (req, res) => {
       }
     }
 
-    res.status(200).json(post);
+    // Populate post with full author and comment author details before returning
+    const populatedPost = await Post.findById(post._id)
+      .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified")
+      .populate({
+        path: "comments.userId",
+        select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
+      })
+      .populate({
+        path: "comments.replies.userId",
+        select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
+      });
+
+    const addedComment = populatedPost?.comments && populatedPost.comments.length > 0
+      ? populatedPost.comments[populatedPost.comments.length - 1]
+      : null;
+
+    emitRealtimeEvent("post_comment_update", {
+      postId: post._id,
+      comment: addedComment,
+      commentsCount: populatedPost?.comments?.length || post.comments.length
+    });
+
+    res.status(200).json(populatedPost || post);
   } catch (error) {
     console.error("Error adding comment:", error);
     res.status(500).json(error.message || "Server Error");
@@ -1561,9 +1590,13 @@ router.get("/single/:id", async (req, res) => {
       mediaType: "video"
     };
 
+    const userFields = "username name profilePic profilePicture avatar isVerified isEmailVerified Followers Followings category tagline accountType";
+    const commentUserFields = "username name profilePic profilePicture avatar isVerified isEmailVerified";
+
     const selectedPost = await Post.findById(id)
-      .populate("userId", "username")
-      .populate("comments.userId", "username profilePicture");
+      .populate("userId", userFields)
+      .populate("comments.userId", commentUserFields)
+      .populate("comments.replies.userId", commentUserFields);
 
     if (!selectedPost) {
       return res.status(404).json({ message: "Post not found" });
@@ -1577,7 +1610,7 @@ router.get("/single/:id", async (req, res) => {
     })
       .sort({ views: -1 })
       .limit(4)
-      .populate("userId", "username");
+      .populate("userId", userFields);
 
     const latestPosts = await Post.find({
       _id: { $ne: id },
@@ -1585,7 +1618,7 @@ router.get("/single/:id", async (req, res) => {
     })
       .sort({ createdAt: -1 })
       .limit(3)
-      .populate("userId", "username");
+      .populate("userId", userFields);
 
     const randomPosts = await Post.aggregate([
       {
@@ -1599,7 +1632,7 @@ router.get("/single/:id", async (req, res) => {
 
     const randomWithUser = await Post.populate(randomPosts, {
       path: "userId",
-      select: "username"
+      select: userFields
     });
 
     let allPosts = [...mostViewed, ...latestPosts, ...randomWithUser];

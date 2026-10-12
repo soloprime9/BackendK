@@ -236,13 +236,27 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
       }
     }
 
+    // Auto-detect YouTube links to categorize as video with zero storage
+    let finalMediaType = mediaType || (media ? "image" : "text");
+    let finalThumbnail = thumbnail || "";
+    const allTextToCheck = `${title || ""} ${media || ""} ${finalLinkPreview?.url || ""}`;
+    const ytMatch = allTextToCheck.match(
+      /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/|live\/)|youtu\.be\/)([^"&?\/\s]{11})/i
+    );
+    if (ytMatch && ytMatch[1]) {
+      finalMediaType = "video";
+      if (!finalThumbnail) {
+        finalThumbnail = `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`;
+      }
+    }
+
     const newPost = new Post({
       userId,
       title: title || "",
       slug,
       media: media || "",
-      mediaType: mediaType || (media ? "image" : "text"),
-      thumbnail: thumbnail || "",
+      mediaType: finalMediaType,
+      thumbnail: finalThumbnail,
       category: category || "Entertainment",
       tags: allTags,
       poll: pollData,
@@ -1151,11 +1165,13 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
     });
     const allExcludeObjectIds = Array.from(allExcludeMap.values());
 
-    // 3. Video Match Filter (supports new and legacy video media)
+    // 3. Video Match Filter (supports native uploaded videos and YouTube links)
     const videoFilter = {
       $or: [
         { mediaType: { $regex: /video/i } },
         { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+        { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+        { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
       ],
     };
 

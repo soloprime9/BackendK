@@ -1154,8 +1154,12 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
     }
 
     // 5. Fetch Candidate Pool (Mix of High Engagement + Fresh)
+    const sortMode = req.query.sort === "latest"
+      ? { createdAt: -1 }
+      : { views: -1, last24hViews: -1, createdAt: -1 };
+
     const candidates = await Post.find(query)
-      .sort({ views: -1, last24hViews: -1, createdAt: -1 })
+      .sort(sortMode)
       .limit(limit * 3)
       .populate("userId", "username name profilePicture profilePic avatar isVerified")
       .populate({

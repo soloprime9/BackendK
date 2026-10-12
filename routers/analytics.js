@@ -207,6 +207,128 @@ router.get("/shorts/recent-telemetry", async (req, res) => {
 });
 
 /* ==============================
+   PLATFORM-WIDE PASSIVE ACTIVITY TRACKER
+   Logs viewer IP, country, city, device, page path, action, referrer
+   silently across the whole platform without requiring user input.
+============================== */
+router.post("/track-activity", async (req, res) => {
+  try {
+    const telemetry = extractClientTelemetry(req);
+    const userId = extractUserId(req);
+
+    const {
+      path = "/",
+      action = "page_view",
+      postId = null,
+      referrer = "",
+      screen = "",
+      duration = 0,
+      completed = false,
+      isShort = false,
+      metadata = {},
+      source = "web"
+    } = req.body;
+
+    const logEntry = new PostAnalytics({
+      postId: postId && mongoose.Types.ObjectId.isValid(postId) ? postId : null,
+      userId: userId && mongoose.Types.ObjectId.isValid(userId) ? userId : null,
+      ip: telemetry.ip,
+      country: telemetry.country,
+      city: telemetry.city,
+      region: telemetry.region,
+      userAgent: telemetry.userAgent,
+      deviceType: telemetry.deviceType,
+      screenResolution: screen || "",
+      path: String(path).slice(0, 255),
+      action: String(action).slice(0, 50),
+      referrer: String(referrer).slice(0, 500),
+      watchDuration: Number(duration) || 0,
+      completed: Boolean(completed),
+      isShort: Boolean(isShort || path.startsWith("/short")),
+      metadata: typeof metadata === "object" ? metadata : {},
+      source: source || "web",
+      timestamp: new Date()
+    });
+
+    await logEntry.save();
+
+    // Broadcast live to Admin dashboard via Socket.io
+    try {
+      const io = getIO();
+      if (io) {
+        io.emit("newActivityGlobal", {
+          _id: logEntry._id,
+          ip: telemetry.ip,
+          country: telemetry.country,
+          city: telemetry.city,
+          path: logEntry.path,
+          action: logEntry.action,
+          deviceType: telemetry.deviceType,
+          timestamp: logEntry.timestamp
+        });
+      }
+    } catch (_) {}
+
+    return res.status(200).json({ success: true, id: logEntry._id });
+  } catch (err) {
+    console.error("Activity tracking error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ==============================
+   GET PLATFORM-WIDE ACTIVITY LOGS & AUDIT TRAIL
+============================== */
+router.get("/activity-logs", async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const actionFilter = req.query.action;
+    const ipFilter = req.query.ip;
+
+    const query = {};
+    if (actionFilter && actionFilter !== "all") query.action = actionFilter;
+    if (ipFilter) query.ip = ipFilter;
+
+    const records = await PostAnalytics.find(query)
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .populate("postId", "title thumbnail media")
+      .populate("userId", "username email");
+
+    // Compute live platform metrics across the last 24h
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [totalEvents, uniqueIps, topPaths, deviceAgg] = await Promise.all([
+      PostAnalytics.countDocuments({ timestamp: { $gte: since24h } }),
+      PostAnalytics.distinct("ip", { timestamp: { $gte: since24h } }),
+      PostAnalytics.aggregate([
+        { $match: { timestamp: { $gte: since24h } } },
+        { $group: { _id: "$path", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 6 }
+      ]),
+      PostAnalytics.aggregate([
+        { $match: { timestamp: { $gte: since24h } } },
+        { $group: { _id: "$deviceType", count: { $sum: 1 } } }
+      ])
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      records,
+      stats: {
+        total24h: totalEvents,
+        uniqueIps24h: uniqueIps.length,
+        topPaths,
+        devices: deviceAgg.reduce((acc, curr) => ({ ...acc, [curr._id]: curr.count }), {})
+      }
+    });
+  } catch (err) {
+    console.error("Fetch activity logs error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ==============================
    TRACK VIEW (STANDARD)
 ============================== */
 

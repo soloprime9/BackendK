@@ -58,6 +58,24 @@ const PostAnalyticsSchema = new Schema({
     type: String,
     default: "feed",
   },
+  path: {
+    type: String,
+    default: "/",
+    index: true,
+  },
+  action: {
+    type: String,
+    default: "page_view",
+    index: true,
+  },
+  referrer: {
+    type: String,
+    default: "",
+  },
+  metadata: {
+    type: Schema.Types.Mixed,
+    default: {},
+  },
   timestamp: {
     type: Date,
     default: Date.now,
@@ -68,5 +86,7 @@ const PostAnalyticsSchema = new Schema({
 PostAnalyticsSchema.index({ postId: 1, timestamp: -1 });
 PostAnalyticsSchema.index({ userId: 1, timestamp: -1 });
 PostAnalyticsSchema.index({ ip: 1, timestamp: -1 });
+PostAnalyticsSchema.index({ path: 1, timestamp: -1 });
+PostAnalyticsSchema.index({ action: 1, timestamp: -1 });
 
 module.exports = model("PostAnalytics", PostAnalyticsSchema);

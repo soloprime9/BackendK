@@ -245,6 +245,9 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
     );
     if (ytMatch && ytMatch[1]) {
       finalMediaType = "video";
+      if (!media) {
+        media = `https://www.youtube.com/shorts/${ytMatch[1]}`;
+      }
       if (!finalThumbnail) {
         finalThumbnail = `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`;
       }
@@ -1172,6 +1175,7 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
         { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
         { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
         { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
+        { title: { $regex: /(?:youtube\.com|youtu\.be)/i } },
       ],
     };
 

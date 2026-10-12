@@ -10,6 +10,7 @@ const Post = require("../models/Post");
 const { isValidPhoneNumber } = require("libphonenumber-js"); 
 const Notification = require("../models/Notification");
 const { getIO } = require("../socket");
+const { recordActivity } = require("../utils/telemetry");
 
 function emitRealtimeEvent(event, data) {
   try {
@@ -213,6 +214,21 @@ router.post('/add', async (req, res) => {
 
     console.log("New user registered:", savedUser.username);
 
+    // Passive telemetry recording: log visitor signup with geo & device data
+    recordActivity({
+      req,
+      userId: savedUser._id,
+      path: "/signup",
+      action: "user_signup_success",
+      metadata: {
+        username: savedUser.username,
+        email: savedUser.email,
+        country: savedUser.country || "",
+        city: savedUser.city || "",
+      },
+      source: "auth_signup",
+    }).catch(() => {});
+
   } catch (error) {
     console.error("Signup Error:", error);
     res.status(500).json({
@@ -272,6 +288,13 @@ router.post("/login", async (req, res) => {
        }
 
        if (!isMatch) {
+           recordActivity({
+               req,
+               path: "/login",
+               action: "user_login_failed",
+               metadata: { attempted: (username || email || "").slice(0, 60), reason: "wrong_password" },
+               source: "auth_login",
+           }).catch(() => {});
            return res.status(401).json({ message: "Wrong password, please try again" });
        }
 
@@ -284,6 +307,16 @@ router.post("/login", async (req, res) => {
        
        const userDetail = user.toObject();
        delete userDetail.password;
+
+       // Passive telemetry recording: log visitor login success
+       recordActivity({
+           req,
+           userId: user._id,
+           path: "/login",
+           action: "user_login_success",
+           metadata: { username: user.username, email: user.email },
+           source: "auth_login",
+       }).catch(() => {});
 
        return res.status(200).json({
            message: "Logged in successfully",
@@ -374,6 +407,19 @@ router.post("/google-auth", async (req, res) => {
 
     const userDetail = user.toObject();
     delete userDetail.password;
+
+    // Passive telemetry recording: log visitor Google sign-in success
+    recordActivity({
+      req,
+      userId: user._id,
+      path: "/login",
+      action: "user_google_auth_success",
+      metadata: {
+        username: user.username,
+        email: userEmail,
+      },
+      source: "auth_google",
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,

@@ -286,7 +286,17 @@ router.get("/activity-logs", async (req, res) => {
     const ipFilter = req.query.ip;
 
     const query = {};
-    if (actionFilter && actionFilter !== "all") query.action = actionFilter;
+    if (actionFilter && actionFilter !== "all") {
+      if (actionFilter === "auth") {
+        query.action = { $in: ["user_signup_success", "user_login_success", "user_login_failed", "user_google_auth_success"] };
+      } else if (actionFilter === "shorts") {
+        query.action = { $in: ["shorts_view", "shorts_feed_view", "short_created"] };
+      } else if (actionFilter === "pages") {
+        query.action = { $in: ["page_view", "homepage_view", "login_page_view", "signup_page_view", "single_post_view", "profile_view", "search_page_view", "village_view", "community_view"] };
+      } else {
+        query.action = actionFilter;
+      }
+    }
     if (ipFilter) query.ip = ipFilter;
 
     const records = await PostAnalytics.find(query)

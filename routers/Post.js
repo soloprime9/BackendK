@@ -8,6 +8,7 @@ const fs = require("fs"); // Still needed for potential in-memory buffer operati
 const path = require("path");
 
 const PostAnalytics = require("../models/PostAnalytics");
+const { recordActivity } = require("../utils/telemetry");
 
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
@@ -288,6 +289,25 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
     }
 
     const populated = await Post.findById(saved._id).populate("userId", "name username profilePicture isVerified");
+
+    // Passive telemetry recording: log post/short creation
+    const isVideoShort = Boolean(
+      (saved.mediaType && /video/i.test(saved.mediaType)) ||
+      (saved.media && /\.(mp4|mov|webm|mkv)$/i.test(saved.media))
+    );
+    recordActivity({
+      req,
+      userId,
+      postId: saved._id,
+      path: isVideoShort ? `/shorts/${saved._id}` : `/post/${saved._id}`,
+      action: isVideoShort ? "short_created" : "post_created",
+      isShort: isVideoShort,
+      metadata: {
+        title: (saved.title || "").slice(0, 100),
+        category: saved.category || "general",
+      },
+      source: "content_creation",
+    }).catch(() => {});
 
     return res.status(201).json(populated);
   } catch (error) {

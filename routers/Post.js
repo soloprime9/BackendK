@@ -1124,12 +1124,34 @@ router.delete("/delete/:postId", async (req, res) => {
    SHORTS & REELS RECOMMENDATION FEED (DEDUPLICATED & DIVERSE)
    Endpoints: GET /shorts, GET /shorts/feed
    Supports:
+   - Native uploaded MP4s + YouTube link posts stored in MongoDB
    - Client session exclusion list (seen IDs)
    - Server-side user watch history exclusion (last 7 days)
    - Creator diversity constraint (no consecutive videos from same creator)
    - Full creator profile & verification badge population
-   - Graceful fallback when all unseen videos are exhausted
+   - Master isolated kill-switch for YouTube integration
 ========================================================================= */
+
+// Master feature flag for external YouTube shorts integration on backend
+const ENABLE_YOUTUBE_SHORTS_IN_FEED = true;
+
+function extractYouTubeId(str) {
+  if (!str || typeof str !== "string") return null;
+  const match = str.match(
+    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/|live\/)|youtu\.be\/)([^"&?\/\s]{11})/i
+  );
+  return match && match[1] ? match[1] : null;
+}
+
+function getPostYouTubeId(post) {
+  if (!post) return null;
+  return (
+    extractYouTubeId(post.media) ||
+    extractYouTubeId(post.linkPreview?.url) ||
+    extractYouTubeId(post.title)
+  );
+}
+
 router.get(['/shorts', '/shorts/feed'], async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -1168,82 +1190,125 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
     });
     const allExcludeObjectIds = Array.from(allExcludeMap.values());
 
-    // 3. Video Match Filter (supports native uploaded videos and YouTube links)
-    const videoFilter = {
-      $or: [
-        { mediaType: { $regex: /video/i } },
-        { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
-        { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
-        { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
-        { title: { $regex: /(?:youtube\.com|youtu\.be)/i } },
-      ],
-    };
-
-    // Primary Query: Exclude all seen videos
-    let query = {
-      ...videoFilter,
-      ...(allExcludeObjectIds.length ? { _id: { $nin: allExcludeObjectIds } } : {}),
-    };
-
-    let totalAvailable = await Post.countDocuments(query);
-    let isFallback = false;
-
-    // 4. Fallback Pool: If user has watched everything available, relax exclusion
-    // only excluding the last 3 client videos so they don't see the same video back-to-back
-    if (totalAvailable === 0 && allExcludeObjectIds.length > 0) {
-      isFallback = true;
-      const immediateExclude = validClientExclude.slice(-3);
-      query = {
-        ...videoFilter,
-        ...(immediateExclude.length ? { _id: { $nin: immediateExclude } } : {}),
-      };
-      totalAvailable = await Post.countDocuments(query);
-    }
-
-    // 5. Fetch Candidate Pool (Mix of High Engagement + Fresh)
     const sortMode = req.query.sort === "latest"
       ? { createdAt: -1 }
       : { views: -1, last24hViews: -1, createdAt: -1 };
 
-    const candidates = await Post.find(query)
-      .sort(sortMode)
-      .limit(limit * 3)
-      .populate("userId", "username name profilePicture profilePic avatar isVerified Followers")
-      .populate({
-        path: "comments.userId",
-        select: "username name profilePicture profilePic avatar isVerified",
-      })
-      .lean();
+    // Native videos filter
+    const nativeQuery = {
+      $and: [
+        {
+          $or: [
+            { mediaType: { $regex: /video/i } },
+            { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+          ],
+        },
+        { media: { $not: /(?:youtube\.com|youtu\.be)/i } },
+        ...(allExcludeObjectIds.length ? [{ _id: { $nin: allExcludeObjectIds } }] : []),
+      ],
+    };
 
-    // 6. Creator Diversity Shuffle (no consecutive videos from same creator)
-    const diversified = [];
-    const pool = [...candidates];
-    // Light shuffle to prevent deterministic ordering
-    pool.sort(() => Math.random() - 0.45);
+    // YouTube link posts filter from MongoDB
+    const youtubeQuery = {
+      $and: [
+        {
+          $or: [
+            { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+            { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
+            { title: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+          ],
+        },
+        ...(allExcludeObjectIds.length ? [{ _id: { $nin: allExcludeObjectIds } }] : []),
+      ],
+    };
 
-    let lastCreatorId = null;
-    while (pool.length > 0 && diversified.length < limit) {
-      let nextIndex = pool.findIndex((p) => {
-        const cId = p.userId?._id?.toString() || p.userId?.toString();
-        return !lastCreatorId || cId !== lastCreatorId;
-      });
+    const populateConfig = [
+      { path: "userId", select: "username name profilePicture profilePic avatar isVerified Followers" },
+      { path: "comments.userId", select: "username name profilePicture profilePic avatar isVerified" },
+    ];
 
-      if (nextIndex === -1) {
-        nextIndex = 0;
-      }
+    // Fetch candidate pools
+    let [nativeCandidates, ytCandidates] = await Promise.all([
+      Post.find(nativeQuery).sort(sortMode).limit(limit * 2).populate(populateConfig[0]).populate(populateConfig[1]).lean(),
+      ENABLE_YOUTUBE_SHORTS_IN_FEED
+        ? Post.find(youtubeQuery).sort({ createdAt: -1 }).limit(limit * 2).populate(populateConfig[0]).populate(populateConfig[1]).lean()
+        : Promise.resolve([]),
+    ]);
 
-      const selected = pool.splice(nextIndex, 1)[0];
-      diversified.push(selected);
-      lastCreatorId = selected.userId?._id?.toString() || selected.userId?.toString();
+    // Fallback Pool if everything has been watched
+    let isFallback = false;
+    if (!nativeCandidates.length && !ytCandidates.length && allExcludeObjectIds.length > 0) {
+      isFallback = true;
+      const immediateExclude = validClientExclude.slice(-3);
+      const fallbackNative = {
+        $or: [
+          { mediaType: { $regex: /video/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+        ],
+        ...(immediateExclude.length ? { _id: { $nin: immediateExclude } } : {}),
+      };
+      const fallbackYt = {
+        $or: [
+          { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+          { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
+          { title: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+        ],
+        ...(immediateExclude.length ? { _id: { $nin: immediateExclude } } : {}),
+      };
+
+      [nativeCandidates, ytCandidates] = await Promise.all([
+        Post.find(fallbackNative).sort(sortMode).limit(limit).populate(populateConfig[0]).populate(populateConfig[1]).lean(),
+        ENABLE_YOUTUBE_SHORTS_IN_FEED
+          ? Post.find(fallbackYt).sort({ createdAt: -1 }).limit(limit).populate(populateConfig[0]).populate(populateConfig[1]).lean()
+          : Promise.resolve([]),
+      ]);
     }
+
+    // Normalize and enrich YouTube posts with thumbnail and direct ID
+    ytCandidates = ytCandidates.map((p) => {
+      const ytId = getPostYouTubeId(p);
+      return {
+        ...p,
+        youtubeId: ytId,
+        media: p.media || (ytId ? `https://www.youtube.com/shorts/${ytId}` : p.linkPreview?.url || ""),
+        thumbnail: p.thumbnail || p.linkPreview?.image || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : ""),
+        mediaType: "video",
+        isYouTubeShort: true,
+      };
+    });
+
+    // Interleave / blend smoothly: 2 native -> 1 YouTube -> 2 native -> 1 YouTube
+    const blended = [];
+    let nIdx = 0;
+    let yIdx = 0;
+
+    while (blended.length < limit && (nIdx < nativeCandidates.length || yIdx < ytCandidates.length)) {
+      if (nIdx < nativeCandidates.length && blended.length < limit) {
+        blended.push(nativeCandidates[nIdx++]);
+      }
+      if (nIdx < nativeCandidates.length && blended.length < limit) {
+        blended.push(nativeCandidates[nIdx++]);
+      }
+      if (yIdx < ytCandidates.length && blended.length < limit) {
+        blended.push(ytCandidates[yIdx++]);
+      }
+      if (nIdx >= nativeCandidates.length && yIdx < ytCandidates.length && blended.length < limit) {
+        blended.push(ytCandidates[yIdx++]);
+      }
+      if (yIdx >= ytCandidates.length && nIdx < nativeCandidates.length && blended.length < limit) {
+        blended.push(nativeCandidates[nIdx++]);
+      }
+    }
+
+    const totalAvailable = nativeCandidates.length + ytCandidates.length;
 
     return res.status(200).json({
       page,
       limit,
       total: totalAvailable,
-      hasMore: totalAvailable > diversified.length,
+      hasMore: (nativeCandidates.length > nIdx || ytCandidates.length > yIdx),
       isFallback,
-      videos: diversified,
+      videos: blended,
     });
   } catch (error) {
     console.error("Error fetching shorts feed:", error);

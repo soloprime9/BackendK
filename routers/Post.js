@@ -193,17 +193,28 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
 
     const { title, media, mediaType, thumbnail, category, tags, poll, linkPreview, location } = req.body;
 
-    if (!title && !media && !poll) {
-      return res.status(400).json({ message: "Post must have text content, media, or a poll" });
+    if (!title && !media && !poll && !linkPreview) {
+      return res.status(400).json({ message: "Post must have text content, media, a link, or a poll" });
     }
+
+    // Auto-detect URL in title for link preview if not explicitly passed
+    let finalLinkPreview = linkPreview;
+    if (!finalLinkPreview && title) {
+      const urlMatch = title.match(/https?:\/\/[^\s]+/i);
+      if (urlMatch) {
+        finalLinkPreview = await extractOpenGraph(urlMatch[0]);
+      }
+    }
+
+    const resolvedTitle = (title || finalLinkPreview?.title || "Shared Post").trim();
 
     // Extract hashtags from title
     const extractedTags = Array.isArray(tags) ? tags : [];
-    const titleTags = ((title || "").match(/#\w+/g) || []).map(t => t.replace("#", ""));
+    const titleTags = ((resolvedTitle || "").match(/#\w+/g) || []).map(t => t.replace("#", ""));
     const allTags = [...new Set([...extractedTags, ...titleTags])];
 
     // Generate slug
-    const baseSlug = (title || "post")
+    const baseSlug = (resolvedTitle || "post")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .slice(0, 50)
@@ -227,27 +238,14 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
       };
     }
 
-    // Auto-detect URL in title for link preview if not explicitly passed
-    let finalLinkPreview = linkPreview;
-    if (!finalLinkPreview && title) {
-      const urlMatch = title.match(/https?:\/\/[^\s]+/i);
-      if (urlMatch) {
-        finalLinkPreview = await extractOpenGraph(urlMatch[0]);
-      }
-    }
-
-    // Auto-detect YouTube links to categorize as video with zero storage
-    let finalMediaType = mediaType || (media ? "image" : "text");
-    let finalThumbnail = thumbnail || "";
-    const allTextToCheck = `${title || ""} ${media || ""} ${finalLinkPreview?.url || ""}`;
+    // Auto-detect YouTube links vs Any other web link
+    let finalMediaType = mediaType || (media ? "image" : (finalLinkPreview ? "link" : "text"));
+    let finalThumbnail = thumbnail || (finalLinkPreview?.image || "");
+    const allTextToCheck = `${resolvedTitle || ""} ${media || ""} ${finalLinkPreview?.url || ""}`;
     const ytMatch = allTextToCheck.match(
       /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/|live\/)|youtu\.be\/)([^"&?\/\s]{11})/i
     );
     if (ytMatch && ytMatch[1]) {
-      finalMediaType = "video";
-      if (!media) {
-        media = `https://www.youtube.com/shorts/${ytMatch[1]}`;
-      }
       if (!finalThumbnail) {
         finalThumbnail = `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`;
       }
@@ -255,7 +253,7 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
 
     const newPost = new Post({
       userId,
-      title: title || "",
+      title: resolvedTitle,
       slug,
       media: media || "",
       mediaType: finalMediaType,

@@ -16,6 +16,7 @@ const analyticsRoutes = require("./routers/analytics");
 const pwaAnalyticsRoute = require("./routers/pwaAnalytics");
 const reminderRoutes = require("./routers/reminder");
 const notificationRoutes = require("./routers/notification");
+const chatRoutes = require("./routers/chat");
 
 
 const app = express();
@@ -62,6 +63,7 @@ app.use("/analytics", analyticsRoutes);
 app.use("/api/pwa", pwaAnalyticsRoute);
 app.use("/reminder", reminderRoutes);
 app.use("/notification", notificationRoutes);
+app.use("/chat", chatRoutes);
 
 
 // ================= START SERVER =================

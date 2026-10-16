@@ -861,61 +861,6 @@ router.get("/mango/getall", async (req, res) => {
       sortOptions = { views: -1, trendingScore: -1, createdAt: -1 };
     }
 
-    if (!type || type === "all") {
-      // Balanced mixed feed: Guarantee both video reels and non-video posts (images, discussions, polls) appear on the discovery stream!
-      const halfLimit = Math.ceil(limit / 2);
-      const halfSkip = (page - 1) * halfLimit;
-
-      const videoFilter = {
-        ...queryFilter,
-        $or: [
-          { mediaType: { $regex: /video/i } },
-          { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
-        ]
-      };
-
-      const nonVideoFilter = {
-        ...queryFilter,
-        $or: [
-          { mediaType: { $in: ["image", "text", "discussion"] } },
-          { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } },
-          { media: "" },
-          { media: null },
-          { media: { $exists: false } },
-          { "poll.question": { $exists: true, $ne: "" } }
-        ]
-      };
-
-      const [videoPosts, nonVideoPosts] = await Promise.all([
-        Post.find(videoFilter)
-          .sort(sortOptions)
-          .skip(halfSkip)
-          .limit(halfLimit)
-          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
-          .populate({
-            path: "comments.userId",
-            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
-          }),
-        Post.find(nonVideoFilter)
-          .sort(sortOptions)
-          .skip(halfSkip)
-          .limit(halfLimit)
-          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
-          .populate({
-            path: "comments.userId",
-            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
-          })
-      ]);
-
-      const interleaved = [];
-      const maxLen = Math.max(videoPosts.length, nonVideoPosts.length);
-      for (let i = 0; i < maxLen; i++) {
-        if (i < nonVideoPosts.length) interleaved.push(nonVideoPosts[i]);
-        if (i < videoPosts.length) interleaved.push(videoPosts[i]);
-      }
-
-      return res.status(200).json(interleaved.slice(0, limit));
-    }
 
     const posts = await Post.find(queryFilter)
       .sort(sortOptions)

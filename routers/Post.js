@@ -865,91 +865,137 @@ router.get("/mango/getall", async (req, res) => {
       sortOptions = { views: -1, trendingScore: -1, createdAt: -1 };
     }
 
-    // 5. Natural Social Discovery Blend for Discovery Feed
+    // 5. Intelligent Multi-Pool Social Discovery Algorithm (Reels, Videos, Photos, Discussions)
     if (!type || type === "all") {
-      const videoLimit = Math.max(2, Math.floor(limit * 0.4)); // ~40% rich video content
-      const communityLimit = limit - videoLimit;               // ~60% community & discussion content
-      const videoSkip = (page - 1) * videoLimit;
-      const communitySkip = (page - 1) * communityLimit;
-
-      const videoQuery = {
-        ...queryFilter,
-        ...videoCondition
-      };
-
-      const communityQuery = {
-        ...queryFilter,
+      const nativeVideoCondition = {
         $or: [
-          { mediaType: { $in: ["image", "text", "discussion", "poll"] } },
-          { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } },
-          { media: "" },
-          { media: null },
-          { media: { $exists: false } },
-          { "poll.question": { $exists: true, $ne: "" } }
+          { mediaType: { $regex: /video/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
         ]
       };
 
-      const [videoPosts, communityPosts] = await Promise.all([
-        Post.find(videoQuery)
+      const youtubeVideoCondition = {
+        $or: [
+          { media: { $regex: /(youtube\.com|youtu\.be)/i } },
+          { "linkPreview.url": { $regex: /(youtube\.com|youtu\.be)/i } },
+          { "linkPreview.siteName": { $regex: /youtube/i } }
+        ]
+      };
+
+      const communityCondition = {
+        $and: [
+          {
+            $or: [
+              { mediaType: { $in: ["image", "image/jpeg", "image/png", "image/webp", "text", "discussion", "poll"] } },
+              { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } },
+              { "poll.question": { $exists: true, $ne: "" } }
+            ]
+          },
+          {
+            $nor: [
+              { mediaType: { $regex: /video/i } },
+              { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } },
+              { media: { $regex: /(youtube\.com|youtu\.be)/i } },
+              { "linkPreview.url": { $regex: /(youtube\.com|youtu\.be)/i } },
+              { "linkPreview.siteName": { $regex: /youtube/i } }
+            ]
+          }
+        ]
+      };
+
+      const buildScopedQuery = (condition) => {
+        const clauses = [];
+        if (queryFilter && Object.keys(queryFilter).length > 0) {
+          clauses.push(queryFilter);
+        }
+        if (condition) {
+          clauses.push(condition);
+        }
+        return clauses.length === 1 ? clauses[0] : clauses.length > 1 ? { $and: clauses } : {};
+      };
+
+      // Quotas per page
+      const nativeQuota = Math.max(3, Math.floor(limit * 0.35));
+      const communityQuota = Math.max(4, Math.floor(limit * 0.35));
+      const youtubeQuota = 2;
+      const latestQuota = 2;
+
+      const populateUser = {
+        path: "userId",
+        select: "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline"
+      };
+      const populateComments = {
+        path: "comments.userId",
+        select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
+      };
+
+      const [nativeVideos, youtubeVideos, communityPosts, latestPosts] = await Promise.all([
+        Post.find(buildScopedQuery(nativeVideoCondition))
+          .sort({ isPinned: -1, views: -1, createdAt: -1 })
+          .skip((page - 1) * nativeQuota)
+          .limit(nativeQuota)
+          .populate(populateUser)
+          .populate(populateComments),
+        Post.find(buildScopedQuery(youtubeVideoCondition))
           .sort(sortOptions)
-          .skip(videoSkip)
-          .limit(videoLimit)
-          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
-          .populate({
-            path: "comments.userId",
-            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
-          }),
-        Post.find(communityQuery)
+          .skip((page - 1) * youtubeQuota)
+          .limit(youtubeQuota)
+          .populate(populateUser)
+          .populate(populateComments),
+        Post.find(buildScopedQuery(communityCondition))
           .sort(sortOptions)
-          .skip(communitySkip)
-          .limit(communityLimit)
-          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
-          .populate({
-            path: "comments.userId",
-            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
-          })
+          .skip((page - 1) * communityQuota)
+          .limit(communityQuota)
+          .populate(populateUser)
+          .populate(populateComments),
+        Post.find(buildScopedQuery(null))
+          .sort(sortOptions)
+          .skip((page - 1) * latestQuota)
+          .limit(latestQuota)
+          .populate(populateUser)
+          .populate(populateComments)
       ]);
 
-      // Natural organic blend: 2 community posts, then 1 video post (like Instagram/Facebook feed)
       const blended = [];
       const seenIds = new Set();
-      let cIdx = 0;
-      let vIdx = 0;
+      const seenTitles = new Set();
 
-      while (blended.length < limit && (cIdx < communityPosts.length || vIdx < videoPosts.length)) {
-        for (let k = 0; k < 2 && cIdx < communityPosts.length; k++) {
-          const cp = communityPosts[cIdx++];
-          const id = String(cp._id);
-          if (!seenIds.has(id)) {
-            seenIds.add(id);
-            blended.push(cp);
-          }
+      const normalizeTitle = (t) => (t || "").toLowerCase().trim().replace(/[^\w\s]/gi, "").substring(0, 25);
+
+      const tryAdd = (post) => {
+        if (!post) return false;
+        const id = String(post._id);
+        if (seenIds.has(id)) return false;
+
+        const normTitle = normalizeTitle(post.title);
+        if (normTitle && seenTitles.has(normTitle)) {
+          return false;
         }
-        if (vIdx < videoPosts.length) {
-          const vp = videoPosts[vIdx++];
-          const id = String(vp._id);
-          if (!seenIds.has(id)) {
-            seenIds.add(id);
-            blended.push(vp);
-          }
-        }
+
+        seenIds.add(id);
+        if (normTitle) seenTitles.add(normTitle);
+        blended.push(post);
+        return true;
+      };
+
+      let l = 0, n = 0, c = 0, y = 0;
+      while (blended.length < limit && (l < latestPosts.length || n < nativeVideos.length || c < communityPosts.length || y < youtubeVideos.length)) {
+        if (l < latestPosts.length) tryAdd(latestPosts[l++]);
+        if (n < nativeVideos.length) tryAdd(nativeVideos[n++]);
+        if (c < communityPosts.length) tryAdd(communityPosts[c++]);
+        if (y < youtubeVideos.length) tryAdd(youtubeVideos[y++]);
+        if (n < nativeVideos.length) tryAdd(nativeVideos[n++]);
+        if (c < communityPosts.length) tryAdd(communityPosts[c++]);
       }
 
-      // Backfill if one bucket ran low
-      while (blended.length < limit && cIdx < communityPosts.length) {
-        const cp = communityPosts[cIdx++];
-        const id = String(cp._id);
+      // Backfill to reach full limit if some buckets were exhausted
+      const allCandidates = [...latestPosts, ...nativeVideos, ...communityPosts, ...youtubeVideos];
+      for (const post of allCandidates) {
+        if (blended.length >= limit) break;
+        const id = String(post._id);
         if (!seenIds.has(id)) {
           seenIds.add(id);
-          blended.push(cp);
-        }
-      }
-      while (blended.length < limit && vIdx < videoPosts.length) {
-        const vp = videoPosts[vIdx++];
-        const id = String(vp._id);
-        if (!seenIds.has(id)) {
-          seenIds.add(id);
-          blended.push(vp);
+          blended.push(post);
         }
       }
 

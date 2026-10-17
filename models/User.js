@@ -73,6 +73,11 @@ UserSchema.pre("save", function(next) {
   next();
 });
 
+// High-Performance indexes for creator discovery, following lists, and search
+UserSchema.index({ isVerified: 1, createdAt: -1 });
+UserSchema.index({ name: 1 });
+UserSchema.index({ category: 1 });
+
 const User = model("User", UserSchema);
   
 module.exports = User;

@@ -89,7 +89,15 @@ const PostSchema = new Schema({
     siteName: { type: String, default: "" },
     favicon: { type: String, default: "" }
   },
-}, { timestamps: true });
+// High-Performance Compound & Single Indexes (Eliminates slow COLLSCANs across 2,300+ posts)
+PostSchema.index({ isPinned: -1, createdAt: -1 });
+PostSchema.index({ mediaType: 1, createdAt: -1 });
+PostSchema.index({ userId: 1, createdAt: -1 });
+PostSchema.index({ category: 1, createdAt: -1 });
+PostSchema.index({ views: -1, createdAt: -1 });
+PostSchema.index({ tags: 1 });
+PostSchema.index({ "linkPreview.url": 1 });
+PostSchema.index({ media: 1 });
 
 module.exports = model("Post", PostSchema);
 

@@ -19,6 +19,8 @@ const notificationRoutes = require("./routers/notification");
 const chatRoutes = require("./routers/chat");
 
 
+const compression = require("compression");
+
 const app = express();
 const server = http.createServer(app);
 
@@ -28,6 +30,15 @@ const io = initSocket(server);
 app.set("trust proxy", 1);
 
 // ================= MIDDLEWARE =================
+
+// High-Performance Gzip/Brotli Compression (Reduces JSON payload sizes by 70-80%)
+app.use(compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    if (req.headers["x-no-compression"]) return false;
+    return compression.filter(req, res);
+  }
+}));
 
 app.use(cors({
   origin: (origin, callback) => {

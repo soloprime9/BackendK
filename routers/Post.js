@@ -822,15 +822,20 @@ router.get("/mango/getall", async (req, res) => {
       }
     }
 
+    const videoCondition = {
+      $or: [
+        { mediaType: { $regex: /video/i } },
+        { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } },
+        { media: { $regex: /(youtube\.com|youtu\.be)/i } },
+        { "linkPreview.url": { $regex: /(youtube\.com|youtu\.be)/i } },
+        { "linkPreview.siteName": { $regex: /youtube/i } }
+      ]
+    };
+
     // 3. Intelligent Media Type Filter (Supports ALL mixed content by default, or specific filters)
     if (type === "video") {
       queryFilter.$and = queryFilter.$and || [];
-      queryFilter.$and.push({
-        $or: [
-          { mediaType: { $regex: /video/i } },
-          { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
-        ]
-      });
+      queryFilter.$and.push(videoCondition);
     } else if (type === "image" || type === "photo") {
       queryFilter.$and = queryFilter.$and || [];
       queryFilter.$and.push({
@@ -853,7 +858,6 @@ router.get("/mango/getall", async (req, res) => {
     } else if (type === "poll") {
       queryFilter["poll.question"] = { $exists: true, $ne: "" };
     }
-    // When type === "all" or undefined: queryFilter allows ALL content types for a rich mixed social feed!
 
     // 4. Sort order
     let sortOptions = { isPinned: -1, createdAt: -1 };
@@ -861,6 +865,98 @@ router.get("/mango/getall", async (req, res) => {
       sortOptions = { views: -1, trendingScore: -1, createdAt: -1 };
     }
 
+    // 5. Natural Social Discovery Blend for Discovery Feed
+    if (!type || type === "all") {
+      const videoLimit = Math.max(2, Math.floor(limit * 0.4)); // ~40% rich video content
+      const communityLimit = limit - videoLimit;               // ~60% community & discussion content
+      const videoSkip = (page - 1) * videoLimit;
+      const communitySkip = (page - 1) * communityLimit;
+
+      const videoQuery = {
+        ...queryFilter,
+        ...videoCondition
+      };
+
+      const communityQuery = {
+        ...queryFilter,
+        $or: [
+          { mediaType: { $in: ["image", "text", "discussion", "poll"] } },
+          { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } },
+          { media: "" },
+          { media: null },
+          { media: { $exists: false } },
+          { "poll.question": { $exists: true, $ne: "" } }
+        ]
+      };
+
+      const [videoPosts, communityPosts] = await Promise.all([
+        Post.find(videoQuery)
+          .sort(sortOptions)
+          .skip(videoSkip)
+          .limit(videoLimit)
+          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
+          .populate({
+            path: "comments.userId",
+            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
+          }),
+        Post.find(communityQuery)
+          .sort(sortOptions)
+          .skip(communitySkip)
+          .limit(communityLimit)
+          .populate("userId", "username name profilePic profilePicture avatar isVerified isEmailVerified category tagline")
+          .populate({
+            path: "comments.userId",
+            select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
+          })
+      ]);
+
+      // Natural organic blend: 2 community posts, then 1 video post (like Instagram/Facebook feed)
+      const blended = [];
+      const seenIds = new Set();
+      let cIdx = 0;
+      let vIdx = 0;
+
+      while (blended.length < limit && (cIdx < communityPosts.length || vIdx < videoPosts.length)) {
+        for (let k = 0; k < 2 && cIdx < communityPosts.length; k++) {
+          const cp = communityPosts[cIdx++];
+          const id = String(cp._id);
+          if (!seenIds.has(id)) {
+            seenIds.add(id);
+            blended.push(cp);
+          }
+        }
+        if (vIdx < videoPosts.length) {
+          const vp = videoPosts[vIdx++];
+          const id = String(vp._id);
+          if (!seenIds.has(id)) {
+            seenIds.add(id);
+            blended.push(vp);
+          }
+        }
+      }
+
+      // Backfill if one bucket ran low
+      while (blended.length < limit && cIdx < communityPosts.length) {
+        const cp = communityPosts[cIdx++];
+        const id = String(cp._id);
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          blended.push(cp);
+        }
+      }
+      while (blended.length < limit && vIdx < videoPosts.length) {
+        const vp = videoPosts[vIdx++];
+        const id = String(vp._id);
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          blended.push(vp);
+        }
+      }
+
+      if (blended.length > 0) {
+        return res.status(200).json(blended);
+      }
+    }
 
     const posts = await Post.find(queryFilter)
       .sort(sortOptions)

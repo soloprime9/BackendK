@@ -64,7 +64,14 @@ app.get("/", (req, res) => {
   res.send("Backend Running 🚀");
 });
 
-// ================= ROUTES =================
+const { authLimiter } = require("./middleware/rateLimiter");
+
+// Rate limit sensitive authentication endpoints to prevent brute-force attacks
+app.use("/user/login", authLimiter);
+app.use("/user/add", authLimiter);
+app.use("/user/verify-otp", authLimiter);
+app.use("/user/send-otp", authLimiter);
+app.use("/user/change-password", authLimiter);
 
 app.use("/user", User);
 app.use("/post", Post);

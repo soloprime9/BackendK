@@ -914,11 +914,11 @@ router.get("/mango/getall", async (req, res) => {
         return clauses.length === 1 ? clauses[0] : clauses.length > 1 ? { $and: clauses } : {};
       };
 
-      // Quotas per page
+      // Dynamic proportional quotas per page scaling with requested limit
       const nativeQuota = Math.max(3, Math.floor(limit * 0.35));
-      const communityQuota = Math.max(4, Math.floor(limit * 0.35));
-      const youtubeQuota = 2;
-      const latestQuota = 2;
+      const communityQuota = Math.max(3, Math.floor(limit * 0.35));
+      const youtubeQuota = Math.max(2, Math.floor(limit * 0.15));
+      const latestQuota = Math.max(2, Math.floor(limit * 0.15));
 
       const populateUser = {
         path: "userId",

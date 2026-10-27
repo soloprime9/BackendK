@@ -36,8 +36,8 @@ const ALLOWED_IMAGE = [
 ];
 const ALL_ALLOWED = [...ALLOWED_VIDEO, ...ALLOWED_IMAGE];
 
-// Max sizes: 50MB video (Shorts & Reels), 15MB raw image (compressed to ~180KB client-side)
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+// Max sizes: 25MB video (Shorts & Reels), 15MB raw image (compressed to ~180KB client-side)
+const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 const MAX_VIDEO_DURATION_SECONDS = 95; // 90s + 5s buffer
 
@@ -81,16 +81,62 @@ function secondsToISO(seconds) {
 // ─── Check route ───────────────────────────────────────────────────
 router.get("/check", (req, res) => res.json({ message: "Access granted!" }));
 
+// ─── Daily Video Upload Status Endpoint ─────────────────────────────
+router.get("/video-daily-status", verifyToken, async (req, res) => {
+  try {
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const uploadedToday = await Post.countDocuments({
+      userId,
+      $or: [
+        { mediaType: { $regex: /video/i } },
+        { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } }
+      ],
+      createdAt: { $gte: twentyFourHoursAgo }
+    });
+
+    const maxDaily = 2;
+    const remaining = Math.max(0, maxDaily - uploadedToday);
+
+    return res.status(200).json({
+      allowed: uploadedToday < maxDaily,
+      uploadedToday,
+      maxDaily,
+      remaining,
+      maxSizeMB: 25
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────
 // STEP 1 — Frontend asks for presigned URLs (for video + thumbnail)
 // ─────────────────────────────────────────────────────────────────────
 router.post("/presign", verifyToken, async (req, res) => {
   try {
-    const userId = req.user.UserId;
+    const userId = req.user?.UserId || req.user?.id || req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-    // Daily upload limit per user on free tier (Max 8 videos/24h)
-    if (!checkR2RateLimit(`r2_vid_${userId}`, 8, 86400000)) {
-      return res.status(429).json({ error: "Daily video upload limit reached (Max 8 reels per day on free storage). Resets in 24h." });
+    // 1. Persistent Database check: Strict Daily Limit of 2 videos per user in last 24h
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recentVideoCount = await Post.countDocuments({
+      userId,
+      $or: [
+        { mediaType: { $regex: /video/i } },
+        { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } }
+      ],
+      createdAt: { $gte: twentyFourHoursAgo }
+    });
+
+    if (recentVideoCount >= 2) {
+      return res.status(429).json({
+        error: "Daily video upload limit reached! To maintain community quality, users can upload up to 2 videos per day. You can still publish photos, discussions, or polls today!"
+      });
     }
 
     const { video, thumbnail } = req.body;
@@ -100,7 +146,7 @@ router.post("/presign", verifyToken, async (req, res) => {
       return res.status(400).json({ error: "Invalid video type. Allowed: mp4, webm, ogg, quicktime" });
     }
     if (video.fileSize > MAX_VIDEO_BYTES) {
-      return res.status(400).json({ error: "Video exceeds 50MB maximum limit for FondPeace Shorts & Reels." });
+      return res.status(400).json({ error: "Video exceeds 25MB maximum limit. Please select a video under 25MB or compress it." });
     }
 
     // ── Validate thumbnail ──
@@ -242,9 +288,31 @@ router.post("/confirm", verifyToken, async (req, res) => {
     const isImage = mediaType && mediaType.startsWith("image");
     const hasMedia = isVideo || isImage;
 
-    // Reject video longer than 90s (95s with buffer)
-    if (isVideo && duration > MAX_VIDEO_DURATION_SECONDS) {
-      return res.status(400).json({ error: "Video exceeds 90-second maximum duration for shorts/reels." });
+    // Strict checks for video posts
+    if (isVideo) {
+      if (duration > MAX_VIDEO_DURATION_SECONDS) {
+        return res.status(400).json({ error: "Video exceeds 90-second maximum duration for shorts/reels." });
+      }
+
+      if (fileSize && Number(fileSize) > MAX_VIDEO_BYTES) {
+        return res.status(400).json({ error: "Video exceeds 25MB maximum limit. Please select a video under 25MB or compress it." });
+      }
+
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentVideoCount = await Post.countDocuments({
+        userId,
+        $or: [
+          { mediaType: { $regex: /video/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } }
+        ],
+        createdAt: { $gte: twentyFourHoursAgo }
+      });
+
+      if (recentVideoCount >= 2) {
+        return res.status(429).json({
+          error: "Daily video upload limit reached! Creators can upload up to 2 videos per day. You can still publish photos, discussions, or articles today!"
+        });
+      }
     }
 
     // A post must have at least text, media, or a poll

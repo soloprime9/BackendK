@@ -251,6 +251,29 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
       }
     }
 
+    // Daily 2-video upload limit check
+    const isDirectVideo =
+      (finalMediaType && finalMediaType.toLowerCase().includes("video")) ||
+      /\.(mp4|mov|webm|mkv|m4v)$/i.test(media || "");
+
+    if (isDirectVideo) {
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentVideoCount = await Post.countDocuments({
+        userId,
+        $or: [
+          { mediaType: { $regex: /video/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } }
+        ],
+        createdAt: { $gte: twentyFourHoursAgo }
+      });
+
+      if (recentVideoCount >= 2) {
+        return res.status(429).json({
+          message: "Daily video upload limit reached! Creators can upload up to 2 videos per day. You can still share photos, discussions, or articles today."
+        });
+      }
+    }
+
     const newPost = new Post({
       userId,
       title: resolvedTitle,

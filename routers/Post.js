@@ -865,7 +865,7 @@ router.get("/mango/getall", async (req, res) => {
       sortOptions = { views: -1, trendingScore: -1, createdAt: -1 };
     }
 
-    // 5. Intelligent Multi-Pool Social Discovery Algorithm (Reels, Videos, Photos, Discussions)
+    // 5. Intelligent Multi-Format Harmonious Discovery Algorithm (Dynamic Multi-Pool Jitter & Anti-Clustering)
     if (!type || type === "all") {
       const nativeVideoCondition = {
         $or: [
@@ -882,22 +882,37 @@ router.get("/mango/getall", async (req, res) => {
         ]
       };
 
-      const communityCondition = {
+      // Non-YouTube rich web link posts (news, articles, blogs with link previews)
+      const webLinkCondition = {
+        $and: [
+          { "linkPreview.url": { $exists: true, $ne: "" } },
+          { "linkPreview.url": { $not: /(youtube\.com|youtu\.be)/i } },
+          { media: { $not: /(youtube\.com|youtu\.be|\.(mp4|mov|webm|mkv)$)/i } }
+        ]
+      };
+
+      // Community images (photos)
+      const imageCondition = {
         $and: [
           {
             $or: [
-              { mediaType: { $in: ["image", "image/jpeg", "image/png", "image/webp", "text", "discussion", "poll"] } },
-              { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } },
-              { "poll.question": { $exists: true, $ne: "" } }
+              { mediaType: { $in: ["image", "image/jpeg", "image/png", "image/webp"] } },
+              { media: { $regex: /\.(jpg|jpeg|png|webp|gif|bmp)$/i } }
             ]
           },
+          { media: { $not: /\.(mp4|mov|webm|mkv)$/i } }
+        ]
+      };
+
+      // Community text discussions and polls
+      const discussionCondition = {
+        $or: [
+          { mediaType: { $in: ["text", "discussion", "poll"] } },
+          { "poll.question": { $exists: true, $ne: "" } },
           {
-            $nor: [
-              { mediaType: { $regex: /video/i } },
-              { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } },
-              { media: { $regex: /(youtube\.com|youtu\.be)/i } },
-              { "linkPreview.url": { $regex: /(youtube\.com|youtu\.be)/i } },
-              { "linkPreview.siteName": { $regex: /youtube/i } }
+            $and: [
+              { media: { $in: ["", null] } },
+              { "linkPreview.url": { $in: ["", null] } }
             ]
           }
         ]
@@ -914,11 +929,11 @@ router.get("/mango/getall", async (req, res) => {
         return clauses.length === 1 ? clauses[0] : clauses.length > 1 ? { $and: clauses } : {};
       };
 
-      // Dynamic proportional quotas per page scaling with requested limit
-      const nativeQuota = Math.max(3, Math.floor(limit * 0.35));
-      const communityQuota = Math.max(3, Math.floor(limit * 0.35));
-      const youtubeQuota = Math.max(2, Math.floor(limit * 0.15));
-      const latestQuota = Math.max(2, Math.floor(limit * 0.15));
+      // Balanced candidate fetching: generous windows so top candidates can be dynamically jittered
+      const videoQuota = Math.max(6, Math.floor(limit * 0.5));
+      const communityQuota = Math.max(6, Math.floor(limit * 0.5));
+      const linkQuota = Math.max(4, Math.floor(limit * 0.3));
+      const latestQuota = Math.max(4, Math.floor(limit * 0.3));
 
       const populateUser = {
         path: "userId",
@@ -929,32 +944,66 @@ router.get("/mango/getall", async (req, res) => {
         select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
       };
 
-      const [nativeVideos, youtubeVideos, communityPosts, latestPosts] = await Promise.all([
+      // High-velocity sort: Pinned first, then trending/views, then recency
+      const videoSortOptions = { isPinned: -1, trendingScore: -1, createdAt: -1 };
+
+      const [nativeVideos, youtubeVideos, communityImages, communityDiscussions, webLinks, latestPosts] = await Promise.all([
         Post.find(buildScopedQuery(nativeVideoCondition))
-          .sort({ isPinned: -1, views: -1, createdAt: -1 })
-          .skip((page - 1) * nativeQuota)
-          .limit(nativeQuota)
+          .sort(videoSortOptions)
+          .skip((page - 1) * Math.floor(videoQuota / 2))
+          .limit(videoQuota)
           .populate(populateUser)
           .populate(populateComments),
         Post.find(buildScopedQuery(youtubeVideoCondition))
           .sort(sortOptions)
-          .skip((page - 1) * youtubeQuota)
-          .limit(youtubeQuota)
+          .skip((page - 1) * Math.floor(videoQuota / 2))
+          .limit(videoQuota)
           .populate(populateUser)
           .populate(populateComments),
-        Post.find(buildScopedQuery(communityCondition))
+        Post.find(buildScopedQuery(imageCondition))
           .sort(sortOptions)
-          .skip((page - 1) * communityQuota)
+          .skip((page - 1) * Math.floor(communityQuota / 2))
           .limit(communityQuota)
           .populate(populateUser)
           .populate(populateComments),
-        Post.find(buildScopedQuery(null))
+        Post.find(buildScopedQuery(discussionCondition))
           .sort(sortOptions)
+          .skip((page - 1) * Math.floor(communityQuota / 2))
+          .limit(communityQuota)
+          .populate(populateUser)
+          .populate(populateComments),
+        Post.find(buildScopedQuery(webLinkCondition))
+          .sort(sortOptions)
+          .skip((page - 1) * linkQuota)
+          .limit(linkQuota)
+          .populate(populateUser)
+          .populate(populateComments),
+        Post.find(buildScopedQuery(null))
+          .sort({ isPinned: -1, createdAt: -1 })
           .skip((page - 1) * latestQuota)
           .limit(latestQuota)
           .populate(populateUser)
           .populate(populateComments)
       ]);
+
+      // Top-K Fisher-Yates Jitter: Rotates top candidates so the exact same video is NEVER stuck at Slot 2
+      const jitterTopCandidates = (list, k = 6) => {
+        if (!Array.isArray(list) || list.length <= 1) return list || [];
+        const top = list.slice(0, Math.min(list.length, k));
+        const rest = list.slice(k);
+        for (let i = top.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [top[i], top[j]] = [top[j], top[i]];
+        }
+        return [...top, ...rest];
+      };
+
+      // Combine video sources (Native Video Reels + YouTube Videos) with rotational diversity
+      const allVideos = jitterTopCandidates([...nativeVideos, ...youtubeVideos], 8);
+      const allImages = jitterTopCandidates(communityImages, 6);
+      const allDiscussions = jitterTopCandidates(communityDiscussions, 6);
+      const allWebLinks = jitterTopCandidates(webLinks, 6);
+      const allLatest = jitterTopCandidates(latestPosts, 4);
 
       const blended = [];
       const seenIds = new Set();
@@ -962,7 +1011,23 @@ router.get("/mango/getall", async (req, res) => {
 
       const normalizeTitle = (t) => (t || "").toLowerCase().trim().replace(/[^\w\s]/gi, "").substring(0, 25);
 
-      const tryAdd = (post) => {
+      const isVideoPost = (p) => {
+        if (!p) return false;
+        const m = p.media || "";
+        const mt = (p.mediaType || "").toLowerCase();
+        const lp = p.linkPreview?.url || "";
+        return (
+          mt.includes("video") ||
+          /\.(mp4|mov|webm|mkv)$/i.test(m) ||
+          /(youtube\.com|youtu\.be)/i.test(m) ||
+          /(youtube\.com|youtu\.be)/i.test(lp) ||
+          /youtube/i.test(p.linkPreview?.siteName || "")
+        );
+      };
+
+      let lastWasVideo = false;
+
+      const tryAdd = (post, allowVideoConsecutive = false) => {
         if (!post) return false;
         const id = String(post._id);
         if (seenIds.has(id)) return false;
@@ -972,31 +1037,79 @@ router.get("/mango/getall", async (req, res) => {
           return false;
         }
 
+        const isVid = isVideoPost(post);
+        // Anti-clustering: Do not place 2 videos consecutively if avoidVideo is requested
+        if (isVid && lastWasVideo && !allowVideoConsecutive) {
+          return false;
+        }
+
         seenIds.add(id);
         if (normTitle) seenTitles.add(normTitle);
         blended.push(post);
+        lastWasVideo = isVid;
         return true;
       };
 
-      let l = 0, n = 0, c = 0, y = 0;
-      while (blended.length < limit && (l < latestPosts.length || n < nativeVideos.length || c < communityPosts.length || y < youtubeVideos.length)) {
-        if (l < latestPosts.length) tryAdd(latestPosts[l++]);
-        if (n < nativeVideos.length) tryAdd(nativeVideos[n++]);
-        if (c < communityPosts.length) tryAdd(communityPosts[c++]);
-        if (y < youtubeVideos.length) tryAdd(youtubeVideos[y++]);
-        if (n < nativeVideos.length) tryAdd(nativeVideos[n++]);
-        if (c < communityPosts.length) tryAdd(communityPosts[c++]);
+      // Multi-format rhythmic distribution
+      let vIdx = 0, imgIdx = 0, discIdx = 0, linkIdx = 0, latIdx = 0;
+
+      while (
+        blended.length < limit &&
+        (latIdx < allLatest.length ||
+          vIdx < allVideos.length ||
+          imgIdx < allImages.length ||
+          linkIdx < allWebLinks.length ||
+          discIdx < allDiscussions.length)
+      ) {
+        // Step A: Latest / Trending Discovery Post
+        if (latIdx < allLatest.length) {
+          tryAdd(allLatest[latIdx++]);
+        }
+        if (blended.length >= limit) break;
+
+        // Step B: Rotated Video / Short (Dynamic jitter prevents video #1 from locking Slot 2)
+        if (vIdx < allVideos.length) {
+          tryAdd(allVideos[vIdx++]);
+        }
+        if (blended.length >= limit) break;
+
+        // Step C: High-Fidelity Image or Rich Web Link Preview
+        if (imgIdx < allImages.length) {
+          tryAdd(allImages[imgIdx++]);
+        } else if (linkIdx < allWebLinks.length) {
+          tryAdd(allWebLinks[linkIdx++]);
+        }
+        if (blended.length >= limit) break;
+
+        // Step D: Community Discussion or Poll
+        if (discIdx < allDiscussions.length) {
+          tryAdd(allDiscussions[discIdx++]);
+        }
+        if (blended.length >= limit) break;
+
+        // Step E: Rich Web Link Article if available
+        if (linkIdx < allWebLinks.length) {
+          tryAdd(allWebLinks[linkIdx++]);
+        }
+        if (blended.length >= limit) break;
+
+        // Step F: Alternate Video (guaranteed anti-clustered because Step C/D/E set lastWasVideo to false)
+        if (vIdx < allVideos.length) {
+          tryAdd(allVideos[vIdx++]);
+        }
+        if (blended.length >= limit) break;
+
+        // Step G: Image
+        if (imgIdx < allImages.length) {
+          tryAdd(allImages[imgIdx++]);
+        }
       }
 
-      // Backfill to reach full limit if some buckets were exhausted
-      const allCandidates = [...latestPosts, ...nativeVideos, ...communityPosts, ...youtubeVideos];
-      for (const post of allCandidates) {
+      // Backfill with remaining candidates if pools were exhausted
+      const allRemaining = [...allLatest, ...allVideos, ...allImages, ...allWebLinks, ...allDiscussions];
+      for (const p of allRemaining) {
         if (blended.length >= limit) break;
-        const id = String(post._id);
-        if (!seenIds.has(id)) {
-          seenIds.add(id);
-          blended.push(post);
-        }
+        tryAdd(p, true); // Allow backfill without strict anti-clustering
       }
 
       if (blended.length > 0) {

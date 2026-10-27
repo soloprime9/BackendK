@@ -333,34 +333,134 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
 
 router.get("/related/mango/getall", async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = 30;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
     const skip = (page - 1) * limit;
 
-    const videoFilter = {
+    // 1. Native uploaded videos
+    const nativeVideoCondition = {
       $or: [
         { mediaType: { $regex: /video/i } },
-        { media: { $regex: /\.(mp4|mov|webm|mkv)$/i } }
+        { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } }
+      ],
+      media: { $not: /(?:youtube\.com|youtu\.be)/i }
+    };
+
+    // 2. Playable YouTube link posts
+    const youtubeVideoCondition = {
+      $or: [
+        { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+        { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
+        { "linkPreview.siteName": { $regex: /youtube/i } },
+        { title: { $regex: /(?:youtube\.com|youtu\.be)/i } }
       ]
     };
 
-    const posts = await Post.find(videoFilter)
-      .sort({ createdAt: -1 }) // Latest first
-      .skip(skip)
-      .limit(limit)
-      .populate("userId", "username name profilePicture profilePic avatar isVerified")
-      .populate({
-        path: "comments.userId",
-        select: "username name profilePicture profilePic avatar isVerified"
-      });
+    const populateConfig = [
+      { path: "userId", select: "username name profilePicture profilePic avatar isVerified" },
+      { path: "comments.userId", select: "username name profilePicture profilePic avatar isVerified" }
+    ];
 
-    return res.status(200).json(posts);
+    const sortOptions = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
+
+    const nativeQuota = Math.ceil(limit * 0.65);
+    const youtubeQuota = Math.ceil(limit * 0.45);
+
+    const [nativeVideos, youtubeVideos] = await Promise.all([
+      Post.find(nativeVideoCondition)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(nativeQuota)
+        .populate(populateConfig[0])
+        .populate(populateConfig[1])
+        .lean(),
+      Post.find(youtubeVideoCondition)
+        .sort({ isPinned: -1, createdAt: -1 })
+        .skip(Math.floor(skip * 0.5))
+        .limit(youtubeQuota)
+        .populate(populateConfig[0])
+        .populate(populateConfig[1])
+        .lean()
+    ]);
+
+    // Enrich and normalize YouTube video posts so frontend renders and plays them seamlessly
+    const enrichedYouTubeVideos = (youtubeVideos || []).map((p) => {
+      const ytId = getPostYouTubeId(p);
+      return {
+        ...p,
+        youtubeId: ytId,
+        media: p.media || (ytId ? `https://www.youtube.com/watch?v=${ytId}` : p.linkPreview?.url || ""),
+        thumbnail: p.thumbnail || p.linkPreview?.image || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : ""),
+        linkPreview: p.linkPreview || (ytId ? {
+          url: `https://www.youtube.com/watch?v=${ytId}`,
+          title: p.title || "YouTube Video",
+          siteName: "YouTube",
+          image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
+        } : null),
+        mediaType: "video",
+        isYouTubeShort: Boolean(ytId)
+      };
+    });
+
+    // Top-K Fisher-Yates Jitter: guarantees fresh dynamic rotation on every visit/refresh
+    const jitterTop = (arr, k = 6) => {
+      if (!Array.isArray(arr) || arr.length <= 1) return arr || [];
+      const top = arr.slice(0, Math.min(arr.length, k));
+      const rest = arr.slice(k);
+      for (let i = top.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [top[i], top[j]] = [top[j], top[i]];
+      }
+      return [...top, ...rest];
+    };
+
+    const jitteredNative = jitterTop(nativeVideos, 8);
+    const jitteredYt = jitterTop(enrichedYouTubeVideos, 6);
+
+    // Interleave smoothly with anti-clustering: 2 native -> 1 youtube -> 2 native -> 1 youtube
+    const blended = [];
+    const seenIds = new Set();
+    const seenTitles = new Set();
+
+    const normalizeTitle = (t) => (t || "").toLowerCase().trim().replace(/[^\w\s]/gi, "").substring(0, 25);
+
+    const tryAdd = (post) => {
+      if (!post) return false;
+      const pid = String(post._id);
+      if (seenIds.has(pid)) return false;
+      const norm = normalizeTitle(post.title);
+      if (norm && seenTitles.has(norm)) return false;
+      seenIds.add(pid);
+      if (norm) seenTitles.add(norm);
+      blended.push(post);
+      return true;
+    };
+
+    let nIdx = 0;
+    let yIdx = 0;
+
+    while (blended.length < limit && (nIdx < jitteredNative.length || yIdx < jitteredYt.length)) {
+      if (nIdx < jitteredNative.length) tryAdd(jitteredNative[nIdx++]);
+      if (blended.length >= limit) break;
+      if (nIdx < jitteredNative.length) tryAdd(jitteredNative[nIdx++]);
+      if (blended.length >= limit) break;
+      if (yIdx < jitteredYt.length) tryAdd(jitteredYt[yIdx++]);
+      if (blended.length >= limit) break;
+    }
+
+    // Backfill if needed
+    for (const p of [...jitteredNative, ...jitteredYt]) {
+      if (blended.length >= limit) break;
+      tryAdd(p);
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=15, stale-while-revalidate=60");
+    return res.status(200).json(blended);
 
   } catch (error) {
-    console.error("Error fetching latest videos:", error);
-
+    console.error("Error fetching related videos:", error);
     return res.status(500).json({
-      message: "Error fetching latest videos",
+      message: "Error fetching related videos",
       error: error.message,
     });
   }
@@ -1889,55 +1989,150 @@ router.get("/single/:id", async (req, res) => {
 
     await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
-    const mostViewed = await Post.find({
-      _id: { $ne: id },
-      ...videoFilter
-    })
-      .sort({ views: -1 })
-      .limit(4)
-      .populate("userId", userFields);
+    // 1. Playable video conditions for related video feed
+    const nativeCondition = {
+      _id: { $ne: new mongoose.Types.ObjectId(id) },
+      $or: [
+        { mediaType: { $regex: /video/i } },
+        { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } }
+      ],
+      media: { $not: /(?:youtube\.com|youtu\.be)/i }
+    };
 
-    const latestPosts = await Post.find({
-      _id: { $ne: id },
-      ...videoFilter
-    })
-      .sort({ createdAt: -1 })
-      .limit(3)
-      .populate("userId", userFields);
+    const youtubeCondition = {
+      _id: { $ne: new mongoose.Types.ObjectId(id) },
+      $or: [
+        { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+        { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
+        { "linkPreview.siteName": { $regex: /youtube/i } },
+        { title: { $regex: /(?:youtube\.com|youtu\.be)/i } }
+      ]
+    };
 
-    const randomPosts = await Post.aggregate([
-      {
-        $match: {
-          _id: { $ne: new mongoose.Types.ObjectId(id) },
-          mediaType: "video"
-        }
-      },
-      { $sample: { size: 3 } }
+    // 2. Contextual Category Affinity (if selectedPost has a defined category)
+    let categoryQuery = null;
+    if (selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community") {
+      categoryQuery = {
+        _id: { $ne: new mongoose.Types.ObjectId(id) },
+        category: selectedPost.category,
+        $or: [
+          { mediaType: { $regex: /video/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+          { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+          { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } }
+        ]
+      };
+    }
+
+    const sortOptions = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
+
+    const [categoryRelated, trendingNative, latestNative, youtubeRelated, randomNative] = await Promise.all([
+      categoryQuery
+        ? Post.find(categoryQuery).sort(sortOptions).limit(5).populate("userId", userFields).lean()
+        : Promise.resolve([]),
+      Post.find(nativeCondition).sort(sortOptions).limit(8).populate("userId", userFields).lean(),
+      Post.find(nativeCondition).sort({ createdAt: -1 }).limit(6).populate("userId", userFields).lean(),
+      Post.find(youtubeCondition).sort({ isPinned: -1, createdAt: -1 }).limit(6).populate("userId", userFields).lean(),
+      Post.aggregate([
+        {
+          $match: {
+            _id: { $ne: new mongoose.Types.ObjectId(id) },
+            $or: [
+              { mediaType: { $regex: /video/i } },
+              { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } }
+            ],
+            media: { $not: /(?:youtube\.com|youtu\.be)/i }
+          }
+        },
+        { $sample: { size: 4 } }
+      ]).then((docs) => Post.populate(docs, { path: "userId", select: userFields }))
     ]);
 
-    const randomWithUser = await Post.populate(randomPosts, {
-      path: "userId",
-      select: userFields
+    // Enrich YouTube posts so they render with direct IDs, valid thumbnails, and playable embed links
+    const enrichedYouTube = (youtubeRelated || []).map((p) => {
+      const ytId = getPostYouTubeId(p);
+      return {
+        ...p,
+        youtubeId: ytId,
+        media: p.media || (ytId ? `https://www.youtube.com/watch?v=${ytId}` : p.linkPreview?.url || ""),
+        thumbnail: p.thumbnail || p.linkPreview?.image || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : ""),
+        linkPreview: p.linkPreview || (ytId ? {
+          url: `https://www.youtube.com/watch?v=${ytId}`,
+          title: p.title || "YouTube Video",
+          siteName: "YouTube",
+          image: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`
+        } : null),
+        mediaType: "video",
+        isYouTubeShort: Boolean(ytId)
+      };
     });
 
-    let allPosts = [...mostViewed, ...latestPosts, ...randomWithUser];
+    // Top-K Fisher-Yates Jitter for non-repetitive rotating related videos
+    const jitterList = (arr) => {
+      if (!Array.isArray(arr) || arr.length <= 1) return arr || [];
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    };
 
-    const seen = new Set();
-    allPosts = allPosts.filter(post => {
-      const pid = post._id.toString();
-      if (seen.has(pid)) return false;
-      seen.add(pid);
+    const jitteredCategory = jitterList(categoryRelated);
+    const jitteredTrending = jitterList(trendingNative);
+    const jitteredLatest = jitterList(latestNative);
+    const jitteredYt = jitterList(enrichedYouTube);
+    const jitteredRandom = jitterList(randomNative);
+
+    const blendedRelated = [];
+    const seenIds = new Set([String(id)]);
+    const seenTitles = new Set();
+    const normalizeTitle = (t) => (t || "").toLowerCase().trim().replace(/[^\w\s]/gi, "").substring(0, 25);
+    if (selectedPost.title) {
+      seenTitles.add(normalizeTitle(selectedPost.title));
+    }
+
+    const tryAddRelated = (post) => {
+      if (!post) return false;
+      const pid = String(post._id);
+      if (seenIds.has(pid)) return false;
+      const norm = normalizeTitle(post.title);
+      if (norm && seenTitles.has(norm)) return false;
+      seenIds.add(pid);
+      if (norm) seenTitles.add(norm);
+      blendedRelated.push(post);
       return true;
-    });
+    };
 
-    allPosts.sort(() => Math.random() - 0.5);
+    // Cadence: Category affinity -> Trending -> YouTube -> Random -> Latest
+    let cIdx = 0, tIdx = 0, yIdx = 0, rIdx = 0, lIdx = 0;
+    while (
+      blendedRelated.length < 12 &&
+      (cIdx < jitteredCategory.length ||
+        tIdx < jitteredTrending.length ||
+        yIdx < jitteredYt.length ||
+        rIdx < jitteredRandom.length ||
+        lIdx < jitteredLatest.length)
+    ) {
+      if (cIdx < jitteredCategory.length) tryAddRelated(jitteredCategory[cIdx++]);
+      if (tIdx < jitteredTrending.length) tryAddRelated(jitteredTrending[tIdx++]);
+      if (yIdx < jitteredYt.length) tryAddRelated(jitteredYt[yIdx++]);
+      if (rIdx < jitteredRandom.length) tryAddRelated(jitteredRandom[rIdx++]);
+      if (lIdx < jitteredLatest.length) tryAddRelated(jitteredLatest[lIdx++]);
+    }
 
-    const finalPosts = allPosts.slice(0, 10);
+    // Backfill if needed
+    for (const p of [...jitteredCategory, ...jitteredTrending, ...jitteredYt, ...jitteredRandom, ...jitteredLatest]) {
+      if (blendedRelated.length >= 12) break;
+      tryAddRelated(p);
+    }
+
+    const finalPosts = blendedRelated.slice(0, 10);
 
     res.status(200).json({
       post: selectedPost,
       related: finalPosts,
-      relatedIds: finalPosts.map(p => p._id)
+      relatedIds: finalPosts.map((p) => p._id)
     });
 
   } catch (error) {
@@ -2336,33 +2531,41 @@ router.get("/image/:id", async (req, res) => {
 
 
         // ONLY VIDEO POSTS
-        // HANDLE OLD POSTS TOO
+        // ONLY VIDEO POSTS (Native + YouTube Playable Videos)
         {
           $match: {
-
             $or: [
-
-              // NEW POSTS
               {
-                mediaType: "video",
+                mediaType: { $regex: /video/i },
               },
-
-              // OLD POSTS
               {
                 media: {
-                  $regex:
-                    /\.(mp4|mov|webm|mkv)$/i,
+                  $regex: /\.(mp4|mov|webm|mkv|m4v)$/i,
                 },
               },
-
+              {
+                media: {
+                  $regex: /(?:youtube\.com|youtu\.be)/i,
+                },
+              },
+              {
+                "linkPreview.url": {
+                  $regex: /(?:youtube\.com|youtu\.be)/i,
+                },
+              },
+              {
+                "linkPreview.siteName": {
+                  $regex: /youtube/i,
+                },
+              },
+              {
+                title: {
+                  $regex: /(?:youtube\.com|youtu\.be)/i,
+                },
+              },
             ],
           },
         },
-
-
-
-
-
 
         // RANDOM VALUE
         {
@@ -2373,19 +2576,11 @@ router.get("/image/:id", async (req, res) => {
           },
         },
 
-
-
-
-
-
-        // LATEST + RANDOM
+        // DYNAMIC RANDOM ROTATION
         {
           $sort: {
-
-            createdAt: -1,
-
             random: 1,
-
+            createdAt: -1,
           },
         },
 

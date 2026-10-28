@@ -1236,7 +1236,7 @@ router.get("/mango/getall", async (req, res) => {
       }
 
       if (blended.length > 0) {
-        res.setHeader("Cache-Control", "public, max-age=15, stale-while-revalidate=60");
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
         return res.status(200).json(blended);
       }
     }
@@ -1251,7 +1251,7 @@ router.get("/mango/getall", async (req, res) => {
         select: "username name profilePic profilePicture avatar isVerified isEmailVerified"
       });
 
-    res.setHeader("Cache-Control", "public, max-age=15, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     return res.status(200).json(posts);
 
   } catch (error) {

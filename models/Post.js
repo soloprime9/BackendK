@@ -88,7 +88,9 @@ const PostSchema = new Schema({
     image: { type: String, default: "" },
     siteName: { type: String, default: "" },
     favicon: { type: String, default: "" }
-  },
+  }
+}, { timestamps: true });
+
 // High-Performance Compound & Single Indexes (Eliminates slow COLLSCANs across 2,300+ posts)
 PostSchema.index({ isPinned: -1, createdAt: -1 });
 PostSchema.index({ mediaType: 1, createdAt: -1 });

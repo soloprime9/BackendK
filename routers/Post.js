@@ -396,6 +396,17 @@ router.get("/related/mango/getall", async (req, res) => {
       ? { ...baseExclude, category }
       : null;
 
+    // 4. Contextual Link Posts (with linkPreview / articles / external links)
+    const contextualLinkCondition = {
+      ...baseExclude,
+      $or: [
+        { "linkPreview.url": { $exists: true, $ne: "" } },
+        { media: { $regex: /^https?:\/\//i } },
+        { postType: "link" }
+      ],
+      ...(category ? { category } : {})
+    };
+
     const populateConfig = [
       { path: "userId", select: "username name profilePicture profilePic avatar isVerified" },
       { path: "comments.userId", select: "username name profilePicture profilePic avatar isVerified" }
@@ -403,11 +414,12 @@ router.get("/related/mango/getall", async (req, res) => {
 
     const sortOptions = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
 
-    const nativeQuota = Math.ceil(limit * 0.5);
-    const youtubeQuota = Math.ceil(limit * 0.3);
-    const categoryQuota = category ? Math.ceil(limit * 0.5) : 0;
+    const nativeQuota = Math.ceil(limit * 0.45);
+    const youtubeQuota = Math.ceil(limit * 0.25);
+    const categoryQuota = category ? Math.ceil(limit * 0.45) : 0;
+    const linkQuota = Math.ceil(limit * 0.35);
 
-    const [nativeVideos, youtubeVideos, categoryPosts] = await Promise.all([
+    const [nativeVideos, youtubeVideos, categoryPosts, contextualLinks] = await Promise.all([
       Post.find(nativeVideoCondition)
         .sort(sortOptions)
         .skip(skip)
@@ -430,7 +442,14 @@ router.get("/related/mango/getall", async (req, res) => {
             .populate(populateConfig[0])
             .populate(populateConfig[1])
             .lean()
-        : Promise.resolve([])
+        : Promise.resolve([]),
+      Post.find(contextualLinkCondition)
+        .sort(sortOptions)
+        .skip(skip)
+        .limit(linkQuota)
+        .populate(populateConfig[0])
+        .populate(populateConfig[1])
+        .lean()
     ]);
 
     // Enrich and normalize YouTube video posts so frontend renders and plays them seamlessly
@@ -465,6 +484,7 @@ router.get("/related/mango/getall", async (req, res) => {
     };
 
     const jitteredCat = jitterTop(categoryPosts, 8);
+    const jitteredLinks = jitterTop(contextualLinks, 6);
     const jitteredNative = jitterTop(nativeVideos, 8);
     const jitteredYt = jitterTop(enrichedYouTubeVideos, 6);
 
@@ -487,26 +507,33 @@ router.get("/related/mango/getall", async (req, res) => {
       return true;
     };
 
-    let cIdx = 0, nIdx = 0, yIdx = 0;
+    let cIdx = 0, lkIdx = 0, nIdx = 0, yIdx = 0;
 
-    while (blended.length < limit && (cIdx < jitteredCat.length || nIdx < jitteredNative.length || yIdx < jitteredYt.length)) {
+    while (
+      blended.length < limit &&
+      (cIdx < jitteredCat.length || lkIdx < jitteredLinks.length || nIdx < jitteredNative.length || yIdx < jitteredYt.length)
+    ) {
       if (cIdx < jitteredCat.length) tryAdd(jitteredCat[cIdx++]);
+      if (blended.length >= limit) break;
+      if (lkIdx < jitteredLinks.length) tryAdd(jitteredLinks[lkIdx++]);
       if (blended.length >= limit) break;
       if (nIdx < jitteredNative.length) tryAdd(jitteredNative[nIdx++]);
       if (blended.length >= limit) break;
       if (yIdx < jitteredYt.length) tryAdd(jitteredYt[yIdx++]);
+      if (blended.length >= limit) break;
+      if (lkIdx < jitteredLinks.length) tryAdd(jitteredLinks[lkIdx++]);
       if (blended.length >= limit) break;
       if (nIdx < jitteredNative.length) tryAdd(jitteredNative[nIdx++]);
       if (blended.length >= limit) break;
     }
 
     // Backfill if needed
-    for (const p of [...jitteredCat, ...jitteredNative, ...jitteredYt]) {
+    for (const p of [...jitteredCat, ...jitteredLinks, ...jitteredNative, ...jitteredYt]) {
       if (blended.length >= limit) break;
       tryAdd(p);
     }
 
-    res.setHeader("Cache-Control", "public, max-age=15, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     return res.status(200).json(blended);
 
   } catch (error) {
@@ -2056,7 +2083,7 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 });
 
 
-router.get("/single/:id", async (req, res) => {
+router.get(["/single/:id", "/short/:id"], async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -2113,12 +2140,34 @@ router.get("/single/:id", async (req, res) => {
       };
     }
 
+    // 3. Contextual Related Link Posts (matching category or content keywords)
+    const titleWords = (selectedPost.title || "")
+      .replace(/[^\w\s]/gi, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 4);
+
+    const linkCondition = {
+      _id: { $ne: new mongoose.Types.ObjectId(id) },
+      $or: [
+        { "linkPreview.url": { $exists: true, $ne: "" } },
+        { media: { $regex: /^https?:\/\//i } },
+        { postType: "link" }
+      ],
+      ...(selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
+        ? { category: selectedPost.category }
+        : titleWords.length > 0
+        ? { title: { $regex: new RegExp(titleWords.join("|"), "i") } }
+        : {})
+    };
+
     const sortOptions = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
 
-    const [categoryRelated, trendingNative, latestNative, youtubeRelated, randomNative] = await Promise.all([
+    const [categoryRelated, contextualLinks, trendingNative, latestNative, youtubeRelated, randomNative] = await Promise.all([
       categoryQuery
         ? Post.find(categoryQuery).sort(sortOptions).limit(5).populate("userId", userFields).lean()
         : Promise.resolve([]),
+      Post.find(linkCondition).sort(sortOptions).limit(6).populate("userId", userFields).lean(),
       Post.find(nativeCondition).sort(sortOptions).limit(8).populate("userId", userFields).lean(),
       Post.find(nativeCondition).sort({ createdAt: -1 }).limit(6).populate("userId", userFields).lean(),
       Post.find(youtubeCondition).sort({ isPinned: -1, createdAt: -1 }).limit(6).populate("userId", userFields).lean(),
@@ -2156,7 +2205,7 @@ router.get("/single/:id", async (req, res) => {
       };
     });
 
-    // Top-K Fisher-Yates Jitter for non-repetitive rotating related videos
+    // Top-K Fisher-Yates Jitter for non-repetitive rotating related content on refresh
     const jitterList = (arr) => {
       if (!Array.isArray(arr) || arr.length <= 1) return arr || [];
       const copy = [...arr];
@@ -2168,6 +2217,7 @@ router.get("/single/:id", async (req, res) => {
     };
 
     const jitteredCategory = jitterList(categoryRelated);
+    const jitteredLinks = jitterList(contextualLinks);
     const jitteredTrending = jitterList(trendingNative);
     const jitteredLatest = jitterList(latestNative);
     const jitteredYt = jitterList(enrichedYouTube);
@@ -2193,31 +2243,35 @@ router.get("/single/:id", async (req, res) => {
       return true;
     };
 
-    // Cadence: Category affinity -> Trending -> YouTube -> Random -> Latest
-    let cIdx = 0, tIdx = 0, yIdx = 0, rIdx = 0, lIdx = 0;
+    // Cadence: Category affinity -> Contextual Link Post -> Trending Video -> Contextual Link Post -> YouTube -> Random -> Latest
+    let cIdx = 0, lkIdx = 0, tIdx = 0, yIdx = 0, rIdx = 0, lIdx = 0;
     while (
       blendedRelated.length < 12 &&
       (cIdx < jitteredCategory.length ||
+        lkIdx < jitteredLinks.length ||
         tIdx < jitteredTrending.length ||
         yIdx < jitteredYt.length ||
         rIdx < jitteredRandom.length ||
         lIdx < jitteredLatest.length)
     ) {
       if (cIdx < jitteredCategory.length) tryAddRelated(jitteredCategory[cIdx++]);
+      if (lkIdx < jitteredLinks.length) tryAddRelated(jitteredLinks[lkIdx++]);
       if (tIdx < jitteredTrending.length) tryAddRelated(jitteredTrending[tIdx++]);
+      if (lkIdx < jitteredLinks.length) tryAddRelated(jitteredLinks[lkIdx++]);
       if (yIdx < jitteredYt.length) tryAddRelated(jitteredYt[yIdx++]);
       if (rIdx < jitteredRandom.length) tryAddRelated(jitteredRandom[rIdx++]);
       if (lIdx < jitteredLatest.length) tryAddRelated(jitteredLatest[lIdx++]);
     }
 
     // Backfill if needed
-    for (const p of [...jitteredCategory, ...jitteredTrending, ...jitteredYt, ...jitteredRandom, ...jitteredLatest]) {
+    for (const p of [...jitteredCategory, ...jitteredLinks, ...jitteredTrending, ...jitteredYt, ...jitteredRandom, ...jitteredLatest]) {
       if (blendedRelated.length >= 12) break;
       tryAddRelated(p);
     }
 
     const finalPosts = blendedRelated.slice(0, 10);
 
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.status(200).json({
       post: selectedPost,
       related: finalPosts,
@@ -2571,16 +2625,38 @@ router.get("/image/:id", async (req, res) => {
       };
     }
 
+    // 2. Contextual Related Link Posts (matching category or content keywords)
+    const titleWords = (selectedPost.title || "")
+      .replace(/[^\w\s]/gi, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 4);
+
+    const linkCondition = {
+      _id: { $ne: currentPostId },
+      $or: [
+        { "linkPreview.url": { $exists: true, $ne: "" } },
+        { media: { $regex: /^https?:\/\//i } },
+        { postType: "link" }
+      ],
+      ...(selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
+        ? { category: selectedPost.category }
+        : titleWords.length > 0
+        ? { title: { $regex: new RegExp(titleWords.join("|"), "i") } }
+        : {})
+    };
+
     const sortTrending = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
     const baseExclude = { _id: { $ne: currentPostId } };
 
-    const [categoryDocs, tagDocs, trendingDocs, latestDocs] = await Promise.all([
+    const [categoryDocs, tagDocs, contextualLinks, trendingDocs, latestDocs] = await Promise.all([
       categoryQuery
         ? Post.find(categoryQuery).sort(sortTrending).limit(8).populate("userId", userFields).lean()
         : Promise.resolve([]),
       tagQuery
         ? Post.find(tagQuery).sort({ createdAt: -1 }).limit(6).populate("userId", userFields).lean()
         : Promise.resolve([]),
+      Post.find(linkCondition).sort(sortTrending).limit(8).populate("userId", userFields).lean(),
       Post.find(baseExclude).sort(sortTrending).limit(10).populate("userId", userFields).lean(),
       Post.find(baseExclude).sort({ createdAt: -1 }).limit(10).populate("userId", userFields).lean(),
     ]);
@@ -2598,6 +2674,7 @@ router.get("/image/:id", async (req, res) => {
 
     const jCategory = jitterList(categoryDocs);
     const jTags = jitterList(tagDocs);
+    const jLinks = jitterList(contextualLinks);
     const jTrending = jitterList(trendingDocs);
     const jLatest = jitterList(latestDocs);
 
@@ -2621,25 +2698,27 @@ router.get("/image/:id", async (req, res) => {
       return true;
     };
 
-    // Cadence: Category affinity -> Tag affinity -> Trending -> Latest
-    let cI = 0, tI = 0, trI = 0, lI = 0;
+    // Cadence: Category affinity -> Contextual Link Post -> Tag affinity -> Trending -> Contextual Link Post -> Latest
+    let cI = 0, lkI = 0, tI = 0, trI = 0, lI = 0;
     while (
       blendedRelated.length < 10 &&
-      (cI < jCategory.length || tI < jTags.length || trI < jTrending.length || lI < jLatest.length)
+      (cI < jCategory.length || lkI < jLinks.length || tI < jTags.length || trI < jTrending.length || lI < jLatest.length)
     ) {
       if (cI < jCategory.length) tryAdd(jCategory[cI++]);
+      if (lkI < jLinks.length) tryAdd(jLinks[lkI++]);
       if (tI < jTags.length) tryAdd(jTags[tI++]);
       if (trI < jTrending.length) tryAdd(jTrending[trI++]);
+      if (lkI < jLinks.length) tryAdd(jLinks[lkI++]);
       if (lI < jLatest.length) tryAdd(jLatest[lI++]);
     }
 
     // Backfill if needed
-    for (const p of [...jCategory, ...jTags, ...jTrending, ...jLatest]) {
+    for (const p of [...jCategory, ...jLinks, ...jTags, ...jTrending, ...jLatest]) {
       if (blendedRelated.length >= 10) break;
       tryAdd(p);
     }
 
-    res.setHeader("Cache-Control", "public, max-age=15, stale-while-revalidate=60");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     return res.status(200).json({
       post: selectedPost,
       related: blendedRelated,

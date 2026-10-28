@@ -1052,11 +1052,11 @@ router.get("/mango/getall", async (req, res) => {
         return clauses.length === 1 ? clauses[0] : clauses.length > 1 ? { $and: clauses } : {};
       };
 
-      // Balanced candidate fetching: generous windows so top candidates can be dynamically jittered
-      const videoQuota = Math.max(6, Math.floor(limit * 0.5));
-      const communityQuota = Math.max(6, Math.floor(limit * 0.5));
-      const linkQuota = Math.max(4, Math.floor(limit * 0.3));
-      const latestQuota = Math.max(4, Math.floor(limit * 0.3));
+      // Balanced candidate fetching: generous windows (20-25 per format) so top candidates dynamically change on every refresh
+      const videoFetchLimit = Math.max(15, limit);
+      const communityFetchLimit = Math.max(15, limit);
+      const linkFetchLimit = Math.max(10, Math.floor(limit * 0.6));
+      const latestFetchLimit = Math.max(12, Math.floor(limit * 0.6));
 
       const populateUser = {
         path: "userId",
@@ -1073,66 +1073,54 @@ router.get("/mango/getall", async (req, res) => {
       const [nativeVideos, youtubeVideos, communityImages, communityDiscussions, webLinks, latestPosts] = await Promise.all([
         Post.find(buildScopedQuery(nativeVideoCondition))
           .sort(videoSortOptions)
-          .skip((page - 1) * Math.floor(videoQuota / 2))
-          .limit(videoQuota)
+          .skip((page - 1) * Math.floor(videoFetchLimit / 2))
+          .limit(videoFetchLimit)
           .populate(populateUser)
           .populate(populateComments),
         Post.find(buildScopedQuery(youtubeVideoCondition))
           .sort(sortOptions)
-          .skip((page - 1) * Math.floor(videoQuota / 2))
-          .limit(videoQuota)
+          .skip((page - 1) * Math.floor(videoFetchLimit / 2))
+          .limit(videoFetchLimit)
           .populate(populateUser)
           .populate(populateComments),
         Post.find(buildScopedQuery(imageCondition))
           .sort(sortOptions)
-          .skip((page - 1) * Math.floor(communityQuota / 2))
-          .limit(communityQuota)
+          .skip((page - 1) * Math.floor(communityFetchLimit / 2))
+          .limit(communityFetchLimit)
           .populate(populateUser)
           .populate(populateComments),
         Post.find(buildScopedQuery(discussionCondition))
           .sort(sortOptions)
-          .skip((page - 1) * Math.floor(communityQuota / 2))
-          .limit(communityQuota)
+          .skip((page - 1) * Math.floor(communityFetchLimit / 2))
+          .limit(communityFetchLimit)
           .populate(populateUser)
           .populate(populateComments),
         Post.find(buildScopedQuery(webLinkCondition))
           .sort(sortOptions)
-          .skip((page - 1) * linkQuota)
-          .limit(linkQuota)
+          .skip((page - 1) * linkFetchLimit)
+          .limit(linkFetchLimit)
           .populate(populateUser)
           .populate(populateComments),
         Post.find(buildScopedQuery(null))
           .sort({ isPinned: -1, createdAt: -1 })
-          .skip((page - 1) * latestQuota)
-          .limit(latestQuota)
+          .skip((page - 1) * latestFetchLimit)
+          .limit(latestFetchLimit)
           .populate(populateUser)
           .populate(populateComments)
       ]);
 
-      // Top-K Fisher-Yates Jitter: Rotates top candidates so the exact same video is NEVER stuck at Slot 2
-      const jitterTopCandidates = (list, k = 6) => {
-        if (!Array.isArray(list) || list.length <= 1) return list || [];
-        const top = list.slice(0, Math.min(list.length, k));
-        const rest = list.slice(k);
+      // High-Entropy Fisher-Yates Shuffle across top 15 candidates in each bucket for true freshness on every refresh
+      const shufflePool = (list, topK = 15) => {
+        if (!Array.isArray(list) || list.length <= 1) return list ? [...list] : [];
+        const copy = [...list];
+        const top = copy.slice(0, Math.min(copy.length, topK));
+        const rest = copy.slice(topK);
         for (let i = top.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [top[i], top[j]] = [top[j], top[i]];
         }
         return [...top, ...rest];
       };
-
-      // Combine video sources (Native Video Reels + YouTube Videos) with rotational diversity
-      const allVideos = jitterTopCandidates([...nativeVideos, ...youtubeVideos], 8);
-      const allImages = jitterTopCandidates(communityImages, 6);
-      const allDiscussions = jitterTopCandidates(communityDiscussions, 6);
-      const allWebLinks = jitterTopCandidates(webLinks, 6);
-      const allLatest = jitterTopCandidates(latestPosts, 4);
-
-      const blended = [];
-      const seenIds = new Set();
-      const seenTitles = new Set();
-
-      const normalizeTitle = (t) => (t || "").toLowerCase().trim().replace(/[^\w\s]/gi, "").substring(0, 25);
 
       const isVideoPost = (p) => {
         if (!p) return false;
@@ -1148,6 +1136,37 @@ router.get("/mango/getall", async (req, res) => {
         );
       };
 
+      const normalizeTitle = (t) => (t || "").toLowerCase().trim().replace(/[^\w\s]/gi, "").substring(0, 25);
+
+      const poolNativeVids = shufflePool(nativeVideos, 15);
+      const poolYoutubeVids = shufflePool(youtubeVideos, 15);
+      const poolImages = shufflePool(communityImages, 15);
+      const poolDiscussions = shufflePool(communityDiscussions, 15);
+      const poolLinks = shufflePool(webLinks, 10);
+      const poolLatest = shufflePool(latestPosts, 15);
+
+      // Interleave video stream (Native MP4 reels prioritized, mixed with YouTube videos)
+      const allVideos = [];
+      let nvI = 0, yvI = 0;
+      while (nvI < poolNativeVids.length || yvI < poolYoutubeVids.length) {
+        if (nvI < poolNativeVids.length) allVideos.push(poolNativeVids[nvI++]);
+        if (yvI < poolYoutubeVids.length) allVideos.push(poolYoutubeVids[yvI++]);
+      }
+
+      // Interleave non-video stream (Photos, Discussions, Web Links, Pure text)
+      const allNonVideos = [];
+      let imgI = 0, discI = 0, linkI = 0, latI = 0;
+      while (imgI < poolImages.length || discI < poolDiscussions.length || linkI < poolLinks.length || latI < poolLatest.length) {
+        if (imgI < poolImages.length) allNonVideos.push(poolImages[imgI++]);
+        if (discI < poolDiscussions.length) allNonVideos.push(poolDiscussions[discI++]);
+        if (latI < poolLatest.length && !isVideoPost(poolLatest[latI])) allNonVideos.push(poolLatest[latI++]);
+        else latI++;
+        if (linkI < poolLinks.length) allNonVideos.push(poolLinks[linkI++]);
+      }
+
+      const blended = [];
+      const seenIds = new Set();
+      const seenTitles = new Set();
       let lastWasVideo = false;
 
       const tryAdd = (post, allowVideoConsecutive = false) => {
@@ -1173,66 +1192,61 @@ router.get("/mango/getall", async (req, res) => {
         return true;
       };
 
-      // Multi-format rhythmic distribution
-      let vIdx = 0, imgIdx = 0, discIdx = 0, linkIdx = 0, latIdx = 0;
+      // Dynamic Slot 1 & 2 hook:
+      // 50% chance: Video Reel FIRST, followed by Photo/Discussion
+      // 50% chance: Photo/Discussion FIRST, followed by Video Reel
+      // Guarantees: Video is ALWAYS in Slot 1 OR Slot 2 (right at the top / aas-paas)!
+      const startWithVideo = Math.random() < 0.5;
 
-      while (
-        blended.length < limit &&
-        (latIdx < allLatest.length ||
-          vIdx < allVideos.length ||
-          imgIdx < allImages.length ||
-          linkIdx < allWebLinks.length ||
-          discIdx < allDiscussions.length)
-      ) {
-        // Step A: Latest / Trending Discovery Post
-        if (latIdx < allLatest.length) {
-          tryAdd(allLatest[latIdx++]);
-        }
-        if (blended.length >= limit) break;
+      let vIdx = 0;
+      let nvIdx = 0;
 
-        // Step B: Rotated Video / Short (Dynamic jitter prevents video #1 from locking Slot 2)
-        if (vIdx < allVideos.length) {
-          tryAdd(allVideos[vIdx++]);
-        }
-        if (blended.length >= limit) break;
+      if (startWithVideo) {
+        // Slot 1: Video Reel
+        while (vIdx < allVideos.length && !tryAdd(allVideos[vIdx++])) {}
+        // Slot 2: Photo or Discussion
+        while (nvIdx < allNonVideos.length && !tryAdd(allNonVideos[nvIdx++])) {}
+      } else {
+        // Slot 1: Photo, Discussion, or Latest Story
+        while (nvIdx < allNonVideos.length && !tryAdd(allNonVideos[nvIdx++])) {}
+        // Slot 2: Video Reel (Guaranteed right at the top!)
+        while (vIdx < allVideos.length && !tryAdd(allVideos[vIdx++])) {}
+      }
 
-        // Step C: High-Fidelity Image or Rich Web Link Preview
-        if (imgIdx < allImages.length) {
-          tryAdd(allImages[imgIdx++]);
-        } else if (linkIdx < allWebLinks.length) {
-          tryAdd(allWebLinks[linkIdx++]);
-        }
-        if (blended.length >= limit) break;
-
-        // Step D: Community Discussion or Poll
-        if (discIdx < allDiscussions.length) {
-          tryAdd(allDiscussions[discIdx++]);
-        }
-        if (blended.length >= limit) break;
-
-        // Step E: Rich Web Link Article if available
-        if (linkIdx < allWebLinks.length) {
-          tryAdd(allWebLinks[linkIdx++]);
-        }
-        if (blended.length >= limit) break;
-
-        // Step F: Alternate Video (guaranteed anti-clustered because Step C/D/E set lastWasVideo to false)
-        if (vIdx < allVideos.length) {
-          tryAdd(allVideos[vIdx++]);
-        }
-        if (blended.length >= limit) break;
-
-        // Step G: Image
-        if (imgIdx < allImages.length) {
-          tryAdd(allImages[imgIdx++]);
+      // Smooth rhythmic alternation for remaining slots
+      while (blended.length < limit && (vIdx < allVideos.length || nvIdx < allNonVideos.length)) {
+        if (lastWasVideo) {
+          let added = false;
+          while (nvIdx < allNonVideos.length) {
+            if (tryAdd(allNonVideos[nvIdx++])) {
+              added = true;
+              break;
+            }
+          }
+          if (!added && vIdx < allVideos.length) {
+            tryAdd(allVideos[vIdx++], true);
+          }
+        } else {
+          let added = false;
+          if (vIdx < allVideos.length) {
+            while (vIdx < allVideos.length) {
+              if (tryAdd(allVideos[vIdx++])) {
+                added = true;
+                break;
+              }
+            }
+          }
+          if (!added && nvIdx < allNonVideos.length) {
+            tryAdd(allNonVideos[nvIdx++]);
+          }
         }
       }
 
-      // Backfill with remaining candidates if pools were exhausted
-      const allRemaining = [...allLatest, ...allVideos, ...allImages, ...allWebLinks, ...allDiscussions];
-      for (const p of allRemaining) {
+      // Backfill remaining candidates if limit not yet reached
+      const remaining = [...allVideos, ...allNonVideos, ...poolLatest];
+      for (const p of remaining) {
         if (blended.length >= limit) break;
-        tryAdd(p, true); // Allow backfill without strict anti-clustering
+        tryAdd(p, true);
       }
 
       if (blended.length > 0) {

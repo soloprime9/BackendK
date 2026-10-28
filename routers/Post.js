@@ -1540,6 +1540,7 @@ function getPostYouTubeId(post) {
   if (!post) return null;
   return (
     extractYouTubeId(post.media) ||
+    extractYouTubeId(post.link) ||
     extractYouTubeId(post.linkPreview?.url) ||
     extractYouTubeId(post.title)
   );
@@ -1587,26 +1588,27 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
       ? { createdAt: -1 }
       : { views: -1, last24hViews: -1, createdAt: -1 };
 
-    // Native videos filter
+    // Native videos filter (ensures playable video format and excludes static images)
     const nativeQuery = {
       $and: [
         {
           $or: [
             { mediaType: { $regex: /video/i } },
-            { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+            { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)(\?.*)?$/i } },
           ],
         },
-        { media: { $not: /(?:youtube\.com|youtu\.be)/i } },
+        { media: { $not: /(?:youtube\.com|youtu\.be|\.(jpe?g|png|gif|webp|svg|bmp))$/i } },
         ...(allExcludeObjectIds.length ? [{ _id: { $nin: allExcludeObjectIds } }] : []),
       ],
     };
 
-    // YouTube link posts filter from MongoDB
+    // YouTube link posts filter from MongoDB (checks media, direct link, and linkPreview)
     const youtubeQuery = {
       $and: [
         {
           $or: [
             { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+            { link: { $regex: /(?:youtube\.com|youtu\.be)/i } },
             { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
             { title: { $regex: /(?:youtube\.com|youtu\.be)/i } },
           ],
@@ -1636,13 +1638,14 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
       const fallbackNative = {
         $or: [
           { mediaType: { $regex: /video/i } },
-          { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+          { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)(\?.*)?$/i } },
         ],
         ...(immediateExclude.length ? { _id: { $nin: immediateExclude } } : {}),
       };
       const fallbackYt = {
         $or: [
           { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+          { link: { $regex: /(?:youtube\.com|youtu\.be)/i } },
           { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } },
           { title: { $regex: /(?:youtube\.com|youtu\.be)/i } },
         ],
@@ -1657,18 +1660,18 @@ router.get(['/shorts', '/shorts/feed'], async (req, res) => {
       ]);
     }
 
-    // Normalize and enrich YouTube posts with thumbnail and direct ID
+    // Normalize and enrich YouTube posts with thumbnail and direct ID; filter out any without valid ytId
     ytCandidates = ytCandidates.map((p) => {
       const ytId = getPostYouTubeId(p);
       return {
         ...p,
         youtubeId: ytId,
-        media: p.media || (ytId ? `https://www.youtube.com/shorts/${ytId}` : p.linkPreview?.url || ""),
+        media: p.media || (ytId ? `https://www.youtube.com/shorts/${ytId}` : p.linkPreview?.url || p.link || ""),
         thumbnail: p.thumbnail || p.linkPreview?.image || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : ""),
         mediaType: "video",
-        isYouTubeShort: true,
+        isYouTubeShort: Boolean(ytId),
       };
-    });
+    }).filter((p) => Boolean(p.youtubeId));
 
     // Top-K Fisher-Yates Jitter for non-repetitive dynamic video order
     const jitterTop = (arr, k = 6) => {

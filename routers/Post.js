@@ -2086,6 +2086,9 @@ router.post("/comment/:postId/like-reply/:commentId/:replyId", verifyToken, asyn
 router.get(["/single/:id", "/short/:id"], async (req, res) => {
   try {
     const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: "Post not found" });
+    }
 
     const videoFilter = {
       mediaType: "video"
@@ -2271,9 +2274,23 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
 
     const finalPosts = blendedRelated.slice(0, 10);
 
+    // Normalize and enrich selectedPost if it's a YouTube video/short post so it plays instantly in ReelsFeed
+    const selYtId = getPostYouTubeId(selectedPost);
+    let normalizedPost = selectedPost.toObject ? selectedPost.toObject() : { ...selectedPost };
+    if (selYtId) {
+      normalizedPost = {
+        ...normalizedPost,
+        youtubeId: selYtId,
+        media: normalizedPost.media || `https://www.youtube.com/shorts/${selYtId}`,
+        thumbnail: normalizedPost.thumbnail || normalizedPost.linkPreview?.image || `https://img.youtube.com/vi/${selYtId}/hqdefault.jpg`,
+        mediaType: "video",
+        isYouTubeShort: true,
+      };
+    }
+
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.status(200).json({
-      post: selectedPost,
+      post: normalizedPost,
       related: finalPosts,
       relatedIds: finalPosts.map((p) => p._id)
     });

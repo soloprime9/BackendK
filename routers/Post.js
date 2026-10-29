@@ -2277,18 +2277,25 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
 
     const finalPosts = blendedRelated.slice(0, 10);
 
-    // Normalize and enrich selectedPost if it's a YouTube video/short post so it plays instantly in ReelsFeed
+    // Normalize and enrich selectedPost if it's a YouTube video/short post or link post
     const selYtId = getPostYouTubeId(selectedPost);
     let normalizedPost = selectedPost.toObject ? selectedPost.toObject() : { ...selectedPost };
     if (selYtId) {
+      const bestThumb =
+        (normalizedPost.thumbnail && !normalizedPost.thumbnail.includes("Fondpeace.jpg") && !normalizedPost.thumbnail.endsWith("/default.jpg"))
+          ? normalizedPost.thumbnail
+          : (normalizedPost.linkPreview?.image || `https://img.youtube.com/vi/${selYtId}/hqdefault.jpg`);
+
       normalizedPost = {
         ...normalizedPost,
         youtubeId: selYtId,
         media: normalizedPost.media || `https://www.youtube.com/shorts/${selYtId}`,
-        thumbnail: normalizedPost.thumbnail || normalizedPost.linkPreview?.image || `https://img.youtube.com/vi/${selYtId}/hqdefault.jpg`,
+        thumbnail: bestThumb,
         mediaType: "video",
         isYouTubeShort: true,
       };
+    } else if (normalizedPost.linkPreview?.image && (!normalizedPost.thumbnail || normalizedPost.thumbnail.includes("Fondpeace.jpg"))) {
+      normalizedPost.thumbnail = normalizedPost.linkPreview.image;
     }
 
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");

@@ -1494,23 +1494,80 @@ router.get("/single/search", async (req, res) => {
 
 
 
-router.delete("/delete/:postId", async (req, res) => {
-    try{
-    const postId = req.params.postId;
-    const delet = await Post.findByIdAndDelete(postId);
-    if(!delet){
-        res.status(404).json("Post Id is wrong");
+router.delete("/delete/:postId", verifyToken, async (req, res) => {
+  try {
+    const { postId } = req.params;
+
+    // 1. Validate ObjectId
+    if (!postId || !mongoose.Types.ObjectId.isValid(postId)) {
+      return res.status(400).json({ success: false, message: "Invalid post ID format" });
     }
 
-    await res.status(200).json(delet);
-    console.log("successfully Deleted");
-
-    }
-    catch(error){
-        res.status(500).json(error);
+    // 2. Extract authenticated user ID from token
+    const requestingUserId = (req.user?.UserId || req.user?.id || req.user?._id)?.toString();
+    if (!requestingUserId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Invalid user credentials" });
     }
 
-})
+    // 3. Find the post to check ownership
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ success: false, message: "Post not found" });
+    }
+
+    // 4. Verify Ownership or Admin Privilege
+    const postAuthorId = (post.userId?._id || post.userId)?.toString();
+    const isOwner = postAuthorId && postAuthorId === requestingUserId;
+
+    // Check if requesting user is an administrator
+    let isAdmin = false;
+    const user = await User.findById(requestingUserId).select("email accountType isAdmin").lean();
+    if (user) {
+      if (
+        user.isAdmin === true ||
+        user.accountType === "admin" ||
+        (user.email && (user.email.toLowerCase().includes("admin") || user.email.toLowerCase().includes("fondpeace")))
+      ) {
+        isAdmin = true;
+      }
+    }
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden: You are not authorized to delete this post"
+      });
+    }
+
+    // 5. Delete post from MongoDB
+    const deletedPost = await Post.findByIdAndDelete(postId);
+
+    // 6. Cascade cleanup across user collections & analytics
+    if (postAuthorId) {
+      await User.findByIdAndUpdate(postAuthorId, { $pull: { posts: postId } }).catch(() => {});
+    }
+    await User.updateMany({ bookmarks: postId }, { $pull: { bookmarks: postId } }).catch(() => {});
+    await User.updateMany({ "watchedShorts.postId": postId }, { $pull: { watchedShorts: { postId } } }).catch(() => {});
+    await PostAnalytics.deleteMany({ postId }).catch(() => {});
+    await Notification.deleteMany({ postId }).catch(() => {});
+
+    // 7. Emit realtime event for connected clients to remove card from feed
+    emitRealtimeEvent("post_deleted", { postId });
+
+    return res.status(200).json({
+      success: true,
+      message: "Post successfully deleted",
+      deletedPostId: postId
+    });
+  } catch (error) {
+    console.error("Error deleting post:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while deleting post",
+      error: error.message
+    });
+  }
+});
 
 
 /* =========================================================================

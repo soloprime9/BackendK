@@ -90,6 +90,17 @@ const PORT = process.env.PORT || 4000;
 
 server.listen(PORT, () => {
   console.log(`🚀 Server running on ${PORT}`);
+
+  // Free-Tier Keep-Alive Heartbeat: Self-pings every 12 minutes to prevent Render spin-down
+  const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || "https://backendk-z915.onrender.com";
+  setInterval(() => {
+    try {
+      const client = keepAliveUrl.startsWith("https") ? require("https") : http;
+      client.get(keepAliveUrl, (res) => {
+        // Heartbeat successful, keeping node process awake
+      }).on("error", () => {});
+    } catch (_) {}
+  }, 12 * 60 * 1000);
 });
 
 

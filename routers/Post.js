@@ -3654,6 +3654,7 @@ router.get("/search/unified", async (req, res) => {
     if (type === "all" || type === "posts" || type === "videos" || type === "tags") {
       const postFilter = {
         $or: [
+          { $text: { $search: q } },
           { title: searchRegex },
           { tags: searchRegex },
           { category: searchRegex }

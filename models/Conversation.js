@@ -63,4 +63,7 @@ const ConversationSchema = new Schema(
 // Index to quickly find user's conversations
 ConversationSchema.index({ participants: 1, updatedAt: -1 });
 
+// Compound multikey index for instant 1-on-1 direct conversation resolution
+ConversationSchema.index({ isGroup: 1, participants: 1 });
+
 module.exports = model("Conversation", ConversationSchema);

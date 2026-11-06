@@ -101,6 +101,12 @@ PostSchema.index({ tags: 1 });
 PostSchema.index({ "linkPreview.url": 1 });
 PostSchema.index({ media: 1 });
 
+// Full-Text Compound Search Index for Unified Search Engine
+PostSchema.index(
+  { title: "text", tags: "text", category: "text" },
+  { weights: { title: 5, tags: 3, category: 1 }, name: "PostTextSearchIndex" }
+);
+
 module.exports = model("Post", PostSchema);
 
 

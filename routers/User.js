@@ -639,11 +639,12 @@ router.get(["/profile/:username/discussions", "/profile-public/:username/discuss
 });
 
 // 6. SEARCH USERS (Sanitized - searches name, username, and email)
-router.get("/mango/search", async (req, res) => {
+router.get(["/search", "/mango/search"], async (req, res) => {
     try {
-        const query = req.query.query;
-        if (!query) return res.status(200).json([]);
-        const regex = new RegExp(query, 'i');
+        const query = (req.query.q || req.query.query || "").trim();
+        if (!query) return res.status(200).json({ success: true, users: [] });
+        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const regex = new RegExp(escaped, 'i');
 
         const users = await User.find({
             $or: [
@@ -651,11 +652,14 @@ router.get("/mango/search", async (req, res) => {
                 { username: regex },
                 { email: regex }
             ]
-        }).select("-password -phone -ipAddress");
+        })
+          .select("name username profilePicture isVerified bio Followers")
+          .limit(25)
+          .lean();
 
-        res.status(200).json(users);
+        res.status(200).json({ success: true, users });
     } catch(error) {
-        res.status(500).json(error);
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 

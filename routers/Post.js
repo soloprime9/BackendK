@@ -1531,18 +1531,25 @@ const ENABLE_YOUTUBE_SHORTS_IN_FEED = true;
 function extractYouTubeId(str) {
   if (!str || typeof str !== "string") return null;
   const match = str.match(
-    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/|live\/)|youtu\.be\/)([^"&?\/\s]{11})/i
+    /(?:(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|vi)\/|.*[?&]v=|shorts\/|live\/))|(?:youtu\.be\/)|(?:ytimg\.com\/vi\/))([^"&?\/\s]{11})/i
   );
   return match && match[1] ? match[1] : null;
 }
 
 function getPostYouTubeId(post) {
   if (!post) return null;
+  if (post.youtubeId && typeof post.youtubeId === "string" && post.youtubeId.trim().length === 11) {
+    return post.youtubeId.trim();
+  }
   return (
     extractYouTubeId(post.media) ||
+    extractYouTubeId(post.mediaUrl) ||
     extractYouTubeId(post.link) ||
     extractYouTubeId(post.linkPreview?.url) ||
-    extractYouTubeId(post.title)
+    extractYouTubeId(post.thumbnail) ||
+    extractYouTubeId(post.title) ||
+    extractYouTubeId(post.content) ||
+    extractYouTubeId(post.description)
   );
 }
 

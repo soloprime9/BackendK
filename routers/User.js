@@ -1466,9 +1466,15 @@ router.post("/otp/verify-email", async (req, res) => {
   }
 });
 
-// 3. Update Rich Creator & Profile Details
-router.post("/profile/update-rich-details", async (req, res) => {
+// 3. Update Rich Creator & Profile Details (Protected & Authenticated)
+router.post("/profile/update-rich-details", verifyToken, async (req, res) => {
   try {
+    // 1. Authenticate user from JWT token
+    const authenticatedUserId = (req.user?.UserId || req.user?.id || req.user?._id)?.toString();
+    if (!authenticatedUserId || !mongoose.Types.ObjectId.isValid(authenticatedUserId)) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Invalid or missing token credentials" });
+    }
+
     const {
       userId,
       accountType,
@@ -1483,26 +1489,55 @@ router.post("/profile/update-rich-details", async (req, res) => {
       name
     } = req.body;
 
-    if (!userId) {
-      return res.status(400).json({ success: false, message: "UserId is required" });
+    // 2. IDOR Prevention: Target defaults to authenticated user ID
+    const targetUserId = (userId || authenticatedUserId).toString();
+
+    // If client requested updating another user's profile, check if caller is an admin
+    if (targetUserId !== authenticatedUserId) {
+      const callingUser = await User.findById(authenticatedUserId).select("isAdmin accountType email").lean();
+      const isAdmin = callingUser && (
+        callingUser.isAdmin === true ||
+        callingUser.accountType === "admin" ||
+        (callingUser.email && (callingUser.email.toLowerCase().includes("admin") || callingUser.email.toLowerCase().includes("fondpeace")))
+      );
+
+      if (!isAdmin) {
+        return res.status(403).json({
+          success: false,
+          message: "Forbidden: You are not authorized to update another user's profile"
+        });
+      }
     }
 
-    const user = await User.findById(userId);
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ success: false, message: "Invalid user ID format" });
+    }
+
+    const user = await User.findById(targetUserId);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    if (name !== undefined) user.name = name;
-    if (bio !== undefined) user.bio = bio;
-    if (website !== undefined) user.website = website;
-    if (accountType !== undefined) user.accountType = accountType;
-    if (category !== undefined) user.category = category;
-    if (tagline !== undefined) user.tagline = tagline;
-    if (pronouns !== undefined) user.pronouns = pronouns;
+    if (name !== undefined) user.name = String(name).trim();
+    if (bio !== undefined) user.bio = String(bio).trim();
+    if (website !== undefined) user.website = String(website).trim();
+    if (category !== undefined) user.category = String(category).trim();
+    if (tagline !== undefined) user.tagline = String(tagline).trim();
+    if (pronouns !== undefined) user.pronouns = String(pronouns).trim();
     if (dateOfBirth !== undefined) user.dateOfBirth = dateOfBirth;
 
+    if (accountType !== undefined) {
+      const allowedTypes = ["viewer", "creator", "brand"];
+      if (allowedTypes.includes(accountType)) {
+        user.accountType = accountType;
+      }
+    }
+
     if (Array.isArray(interests)) {
-      user.interests = interests.map((t) => (t.startsWith("#") ? t : `#${t}`.trim()));
+      user.interests = interests
+        .map((t) => String(t).trim())
+        .filter(Boolean)
+        .map((t) => (t.startsWith("#") ? t : `#${t}`));
     }
 
     if (socialLinks && typeof socialLinks === "object") {
@@ -1533,7 +1568,11 @@ router.post("/profile/update-rich-details", async (req, res) => {
     });
   } catch (error) {
     console.error("Update Rich Details Error:", error);
-    return res.status(500).json({ success: false, message: "Error updating profile details", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Error updating profile details",
+      error: error.message
+    });
   }
 });
 

@@ -1448,17 +1448,18 @@ router.get("/single/search", async (req, res) => {
       const regex = new RegExp(word, "i");
 
       orConditions.push({ title: regex });
-      orConditions.push({ hashtags: regex });
+      orConditions.push({ tags: regex });
+      orConditions.push({ category: regex });
     });
 
     // 3️⃣ Query DB
     const posts = await Post.find({
       $or: orConditions,
     })
-      .select("title thumbnail media mediaType likes comments views userId createdAt")
-      .populate("userId", "username profilePic")
+      .select("title thumbnail media mediaType category tags likes comments views userId createdAt")
+      .populate("userId", "name username profilePicture isVerified")
       .sort({ createdAt: -1 })
-      .limit(30);
+      .limit(40);
 
     res.json(posts);
   } catch (err) {
@@ -3654,7 +3655,6 @@ router.get("/search/unified", async (req, res) => {
     if (type === "all" || type === "posts" || type === "videos" || type === "tags") {
       const postFilter = {
         $or: [
-          { $text: { $search: q } },
           { title: searchRegex },
           { tags: searchRegex },
           { category: searchRegex }

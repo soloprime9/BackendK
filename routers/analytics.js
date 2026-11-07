@@ -293,6 +293,8 @@ router.get("/activity-logs", async (req, res) => {
         query.action = { $in: ["shorts_view", "shorts_feed_view", "short_created"] };
       } else if (actionFilter === "pages") {
         query.action = { $in: ["page_view", "homepage_view", "login_page_view", "signup_page_view", "single_post_view", "profile_view", "search_page_view", "village_view", "community_view"] };
+      } else if (actionFilter === "interactions") {
+        query.action = { $in: ["clipboard_copy", "clipboard_paste", "rage_click", "exit_intent", "scroll_milestone", "tab_backgrounded", "tab_resumed", "network_disconnected", "network_reconnected"] };
       } else {
         query.action = actionFilter;
       }

@@ -332,25 +332,44 @@ router.post("/login", async (req, res) => {
 
 // 3.5 GOOGLE ONE TAP & OAUTH AUTHENTICATION
 router.post("/google-auth", async (req, res) => {
-  const { credential, email, name, avatar, googleId } = req.body;
+  const { credential } = req.body;
 
   try {
-    let userEmail = (email || "").toLowerCase().trim();
-    let userName = (name || "").trim();
-    let userAvatar = avatar || "";
+    if (!credential || typeof credential !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Google credential ID token is required for authentication"
+      });
+    }
 
-    // If credential JWT was sent by Google Identity Services, decode it safely
-    if (credential) {
-      try {
-        const decoded = jwt.decode(credential);
-        if (decoded) {
-          if (decoded.email) userEmail = decoded.email.toLowerCase().trim();
-          if (decoded.name) userName = decoded.name.trim();
-          if (decoded.picture) userAvatar = decoded.picture;
-        }
-      } catch (decErr) {
-        console.error("Error decoding Google credential:", decErr.message);
+    let userEmail = "";
+    let userName = "";
+    let userAvatar = "";
+
+    // 🔐 Cryptographically verify Google ID token with Google OAuth Public Authority
+    try {
+      const googleVerifyRes = await axios.get(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential.trim())}`,
+        { timeout: 7000 }
+      );
+
+      const payload = googleVerifyRes.data;
+      if (!payload || !payload.email || (payload.email_verified !== "true" && payload.email_verified !== true)) {
+        return res.status(401).json({
+          success: false,
+          message: "Unverified Google account or invalid credentials"
+        });
       }
+
+      userEmail = payload.email.toLowerCase().trim();
+      userName = (payload.name || "").trim();
+      userAvatar = payload.picture || "";
+    } catch (verifyErr) {
+      console.error("Google token verification failed:", verifyErr.response?.data || verifyErr.message);
+      return res.status(401).json({
+        success: false,
+        message: "Google authentication token verification failed. Please try again."
+      });
     }
 
     if (!userEmail) {

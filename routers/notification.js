@@ -308,6 +308,41 @@ router.post("/push/broadcast", async (req, res) => {
   }
 });
 
+// 8. GET PUSH & GUEST GROWTH STATS (For Admin Dashboard)
+router.get("/push/stats", async (req, res) => {
+  try {
+    const adminKey = req.headers["x-admin-key"] || req.query.adminKey;
+    if (adminKey !== (process.env.ADMIN_KEY || "fondpeace_secret")) {
+      return res.status(403).json({ success: false, message: "Unauthorized admin access" });
+    }
+
+    const PushSubscription = require("../models/PushSubscription");
+    const [total, guests, registered, recent] = await Promise.all([
+      PushSubscription.countDocuments({ isActive: true }),
+      PushSubscription.countDocuments({ isActive: true, isGuest: true }),
+      PushSubscription.countDocuments({ isActive: true, isGuest: false }),
+      PushSubscription.find({ isActive: true })
+        .sort({ lastActive: -1 })
+        .limit(15)
+        .populate("userId", "name username profilePicture")
+        .select("endpoint userId isGuest userAgent createdAt lastActive")
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalSubscribers: total,
+        guestSubscribers: guests,
+        registeredSubscribers: registered,
+        recentSubscribers: recent
+      }
+    });
+  } catch (err) {
+    console.error("Push stats error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.createOrAggregateNotification = createOrAggregateNotification;
 
 module.exports = router;

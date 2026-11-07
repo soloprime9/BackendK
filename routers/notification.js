@@ -317,7 +317,9 @@ router.get("/push/stats", async (req, res) => {
     }
 
     const PushSubscription = require("../models/PushSubscription");
-    const [total, guests, registered, recent] = await Promise.all([
+    const PostAnalytics = require("../models/PostAnalytics");
+
+    const [total, guests, registered, recent, allowedCount, dismissedCount, guestLikes] = await Promise.all([
       PushSubscription.countDocuments({ isActive: true }),
       PushSubscription.countDocuments({ isActive: true, isGuest: true }),
       PushSubscription.countDocuments({ isActive: true, isGuest: false }),
@@ -325,7 +327,10 @@ router.get("/push/stats", async (req, res) => {
         .sort({ lastActive: -1 })
         .limit(15)
         .populate("userId", "name username profilePicture")
-        .select("endpoint userId isGuest userAgent createdAt lastActive")
+        .select("endpoint userId isGuest userAgent createdAt lastActive"),
+      PostAnalytics.countDocuments({ action: "push_prompt_granted" }),
+      PostAnalytics.countDocuments({ action: "push_prompt_dismissed" }),
+      PostAnalytics.countDocuments({ action: "guest_like_attempt" })
     ]);
 
     return res.status(200).json({
@@ -334,7 +339,10 @@ router.get("/push/stats", async (req, res) => {
         totalSubscribers: total,
         guestSubscribers: guests,
         registeredSubscribers: registered,
-        recentSubscribers: recent
+        recentSubscribers: recent,
+        allowedCount,
+        dismissedCount,
+        guestLikes
       }
     });
   } catch (err) {

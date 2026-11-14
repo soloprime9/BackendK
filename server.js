@@ -17,6 +17,7 @@ const pwaAnalyticsRoute = require("./routers/pwaAnalytics");
 const reminderRoutes = require("./routers/reminder");
 const notificationRoutes = require("./routers/notification");
 const chatRoutes = require("./routers/chat");
+const storeRoutes = require("./routers/store");
 
 
 const compression = require("compression");
@@ -82,6 +83,7 @@ app.use("/api/pwa", pwaAnalyticsRoute);
 app.use("/reminder", reminderRoutes);
 app.use("/notification", notificationRoutes);
 app.use("/chat", chatRoutes);
+app.use("/store", storeRoutes);
 
 
 // ================= START SERVER =================

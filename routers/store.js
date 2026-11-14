@@ -15,7 +15,7 @@ const STORE_PRODUCTS = [
     image: "/images/products/stickmotion-studio.png",
     topmateUrl: "https://topmate.io/fondpeace",
     problemSolved: "Enables non-technical creators to run stickman and motion animation tools on Android, iPhone, Windows, Mac, and Chrome Extension with zero coding.",
-    deliverables: "Chrome Extension + Web Studio + Multi-AI Manager (Gemini/Claude/GPT-4o) + 11-Part Master Guide + Android/iOS Cloud Studio + CapCut Pack + 150+ Scripts + 1,000+ SFX",
+    deliverables: "🎁 FREE BONUS: Carousel Studio Pro + Chrome Extension + Web Studio + Multi-AI (Gemini/Claude/GPT-4o/DeepSeek/Groq) + 11-Part Master Guide + Android/iOS Cloud Studio + CapCut Pack + 150+ Scripts + 1,000+ SFX",
     commercialRights: true
   },
   {

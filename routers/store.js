@@ -4,6 +4,21 @@ const router = express.Router();
 // Curated FondPeace Digital Store Catalog (2026 Production Edition)
 const STORE_PRODUCTS = [
   {
+    id: "stickmotion-studio",
+    title: "🎬 StickMotion AI: Turnkey Stickman & Motion Director Studio",
+    subtitle: "150+ High-Retention Story Scripts, 1-Click Zero-Terminal Setup, Character Consistency Prompts & 1,000+ SFX Audio Pack",
+    category: "video",
+    badge: "🔥 VIRAL CREATOR STUDIO",
+    rating: 5.0,
+    priceUSD: 19,
+    originalPriceUSD: 69,
+    image: "/images/products/stickmotion-studio.png",
+    topmateUrl: "https://topmate.io/fondpeace",
+    problemSolved: "Enables non-technical creators to run stickman and motion animation tools without complex terminal setup.",
+    deliverables: "1-Click launcher + 150+ story scripts + 5 character styles + 1,000+ SFX vault + monetization guide",
+    commercialRights: true
+  },
+  {
     id: "ai-developer-cursor-vault",
     title: "⚡ The 2026 AI Developer & Cursor Agent Prompt System",
     subtitle: "50+ Production .cursorrules, Claude 3.5 Sonnet & Gemini 2.5 Pro High-Context Coding Frameworks",

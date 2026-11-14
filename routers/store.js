@@ -5,17 +5,17 @@ const router = express.Router();
 const STORE_PRODUCTS = [
   {
     id: "stickmotion-studio",
-    title: "🎬 StickMotion AI: Turnkey Stickman & Motion Director Studio",
-    subtitle: "150+ High-Retention Story Scripts, 1-Click Zero-Terminal Setup, Character Consistency Prompts & 1,000+ SFX Audio Pack",
+    title: "🎬 StickMotion AI: Complete Turnkey Stickman Studio & Extension",
+    subtitle: "Chrome Extension + Multi-AI Visual Director + 150+ Story Scripts, CapCut Mobile Pack & Master Setup Guide",
     category: "video",
-    badge: "🔥 VIRAL CREATOR STUDIO",
+    badge: "🔥 COMPLETE 2026 SUITE",
     rating: 5.0,
     priceUSD: 19,
     originalPriceUSD: 69,
     image: "/images/products/stickmotion-studio.png",
     topmateUrl: "https://topmate.io/fondpeace",
-    problemSolved: "Enables non-technical creators to run stickman and motion animation tools on Android, iPhone, Windows and Mac with zero coding.",
-    deliverables: "Android/iOS Cloud Studio + CapCut mobile templates + Windows/Mac launcher + 150+ story scripts + 5 character styles + 1,000+ SFX vault + monetization guide",
+    problemSolved: "Enables non-technical creators to run stickman and motion animation tools on Android, iPhone, Windows, Mac, and Chrome Extension with zero coding.",
+    deliverables: "Chrome Extension + Web Studio + Multi-AI Manager (Gemini/Claude/GPT-4o) + 11-Part Master Guide + Android/iOS Cloud Studio + CapCut Pack + 150+ Scripts + 1,000+ SFX",
     commercialRights: true
   },
   {

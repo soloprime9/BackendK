@@ -5,17 +5,17 @@ const router = express.Router();
 const STORE_PRODUCTS = [
   {
     id: "stickmotion-studio",
-    title: "🎬 StickMotion AI: Complete Turnkey Stickman Studio & Extension",
-    subtitle: "Chrome Extension + Multi-AI Visual Director + 150+ Story Scripts, CapCut Mobile Pack & Master Setup Guide",
+    title: "🎬 StickMotion AI™ Video Director 2.0: Complete Story-to-Video Creator Kit",
+    subtitle: "The Turnkey Faceless Stickman Operating System: 5-Stage Storyboard Director, 10 Ready-Made Viral Story Packs (18M+ Views), 16 Locked Character Style Engines, Live YouTube Viral Radar, Neural Voiceovers, and 45-Min Daily Upload Routine",
     category: "video",
-    badge: "🔥 COMPLETE 2026 SUITE",
+    badge: "🔥 2026 FLAGSHIP CREATOR KIT",
     rating: 5.0,
     priceUSD: 19,
     originalPriceUSD: 69,
-    image: "/images/products/stickmotion-studio.png",
+    image: "/images/products/stickman-animation-studio-pro.jpg",
     topmateUrl: "https://topmate.io/fondpeace",
-    problemSolved: "Enables non-technical creators to run stickman and motion animation tools on Android, iPhone, Windows, Mac, and Chrome Extension with zero coding.",
-    deliverables: "1-Click Launchers + Real Stickman Video Exporter (.webm) + 3D Carousel Studio (server.py) + 845 Core Engine Files + Simple 3-Step Guide",
+    problemSolved: "Starting from a blank screen is frustrating, character anatomy constantly distorts between AI video clips, and voiceover subscriptions drain $60/month. StickMotion AI solves this with locked character formulas, 10 ready-made viral story packs, real neural voiceovers, and 1-click video generation.",
+    deliverables: "1-Click Desktop Launchers + Web Studio App (:8080) + 10 Viral Story Packs + 16 Locked Style Engines + YouTube Viral Radar + 30-Day Daily Upload Routine + Commercial License",
     commercialRights: true
   },
   {

@@ -19,6 +19,21 @@ const STORE_PRODUCTS = [
     commercialRights: true
   },
   {
+    id: "fondpeace-autopilot-os",
+    title: "⚡ FondPeace AutoPilot: AI Business OS (Run Your Business on Autopilot with Claude)",
+    subtitle: "The Turnkey AI Business Operating System: 31-Page Master Playbook, 20 Claude Production Prompts, 40 Viral Reel Concepts, 15 Social Captions & 60-Day Launch Plan",
+    category: "automation",
+    badge: "🔥 NEW LAUNCH • 31-PAGE MASTER PLAYBOOK",
+    rating: 5.0,
+    priceUSD: 19,
+    originalPriceUSD: 49,
+    image: "/images/products/ai-business-os.jpg",
+    topmateUrl: "https://topmate.io/fondpeace_crazy/2411087",
+    problemSolved: "Business owners and creators spend hours replying to repetitive DMs, struggling to write daily content, forgetting to follow up with leads, and losing sales because of manual chaos.",
+    deliverables: "31-Page Master Guide (PDF) + 20 Claude Production Prompts + 40 Viral Reel Concepts + 10 Video Scripts + 15 Captions + Lead Tracker Sheet + 60-Day Launch Plan + Commercial License",
+    commercialRights: true
+  },
+  {
     id: "ai-developer-cursor-vault",
     title: "⚡ The 2026 AI Developer & Cursor Agent Prompt System",
     subtitle: "50+ Production .cursorrules, Claude 3.5 Sonnet & Gemini 2.5 Pro High-Context Coding Frameworks",

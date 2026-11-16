@@ -20,6 +20,7 @@ const STORE_PRODUCTS = [
   },
   {
     id: "fondpeace-autopilot-os",
+    slug: "fondpeace-autopilot-os",
     title: "⚡ FondPeace AutoPilot: AI Business OS (Run Your Business on Autopilot with Claude)",
     subtitle: "The Turnkey AI Business Operating System: 31-Page Master Playbook, 20 Claude Production Prompts, 40 Viral Reel Concepts, 15 Social Captions & 60-Day Launch Plan",
     category: "automation",
@@ -29,7 +30,9 @@ const STORE_PRODUCTS = [
     originalPriceUSD: 49,
     image: "/images/products/ai-business-os.jpg",
     topmateUrl: "https://topmate.io/fondpeace_crazy/2411087",
-    problemSolved: "Business owners and creators spend hours replying to repetitive DMs, struggling to write daily content, forgetting to follow up with leads, and losing sales because of manual chaos.",
+    whoIsThisFor: "Solopreneurs, digital creators, freelance developers, agency owners, and service businesses who want to automate repetitive lead capture, customer messaging, content creation, and weekly reporting with Claude AI and free tools.",
+    problemSolved: "Business owners, solo developers, and creators spend hours replying to repetitive DMs, struggling to write daily content, forgetting to follow up with leads, and losing sales because of manual chaos. Without a system, you are trapped working IN the business instead of ON the business.",
+    solutionBenefit: "A complete 31-page AI Operating System that turns Claude into your business brain. Automates lead generation, FAQ customer replies (24/7), weekly content generation (7 scripts in 10 minutes), appointment reminders, 4-stage follow-up sequences, and Friday analytics reporting without hiring expensive staff.",
     deliverables: "31-Page Master Guide (PDF) + 20 Claude Production Prompts + 40 Viral Reel Concepts + 10 Video Scripts + 15 Captions + Lead Tracker Sheet + 60-Day Launch Plan + Commercial License",
     commercialRights: true
   },

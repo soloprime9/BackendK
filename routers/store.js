@@ -13,7 +13,7 @@ const STORE_PRODUCTS = [
     priceUSD: 19,
     originalPriceUSD: 69,
     image: "/images/products/stickman-animation-studio-pro.jpg",
-    topmateUrl: "https://topmate.io/fondpeace",
+    topmateUrl: "https://topmate.io/fondpeace_crazy/2411087",
     problemSolved: "Starting from a blank screen is frustrating, character anatomy constantly distorts between AI video clips, and voiceover subscriptions drain $60/month. StickMotion AI solves this with locked character formulas, 10 ready-made viral story packs, real neural voiceovers, and 1-click video generation.",
     deliverables: "1-Click Desktop Launchers + Web Studio App (:8080) + 10 Viral Story Packs + 16 Locked Style Engines + YouTube Viral Radar + 30-Day Daily Upload Routine + Commercial License",
     commercialRights: true

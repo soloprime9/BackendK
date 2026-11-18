@@ -667,10 +667,24 @@ router.get("/all-slugs", async (req, res) => {
 
 
 router.get("/all-ids", async (req, res) => {
-  const posts = await Post.find({}, "_id updatedAt createdAt")
-    .sort({ createdAt: -1 }); // 🔥 newest first
+  const posts = await Post.find({}, "_id title media mediaType mtype linkPreview.url tags comments updatedAt createdAt")
+    .sort({ createdAt: -1 })
+    .lean(); // 🔥 newest first
 
-  res.json(posts);
+  const slim = posts.map((p) => ({
+    _id: p._id,
+    title: p.title || "",
+    media: p.media || "",
+    mediaType: p.mediaType || "",
+    mtype: p.mtype || "",
+    linkPreview: p.linkPreview?.url ? { url: p.linkPreview.url } : undefined,
+    tags: Array.isArray(p.tags) ? p.tags : [],
+    commentCount: Array.isArray(p.comments) ? p.comments.length : 0,
+    updatedAt: p.updatedAt,
+    createdAt: p.createdAt,
+  }));
+
+  res.json(slim);
 });
 
 // router.get("/:category/:slug", async (req, res) => {

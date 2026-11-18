@@ -65,6 +65,10 @@ app.get("/", (req, res) => {
   res.send("Backend Running 🚀");
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({ ok: true, service: "fondpeace-backend", ts: Date.now() });
+});
+
 const { authLimiter } = require("./middleware/rateLimiter");
 
 // Rate limit sensitive authentication endpoints to prevent brute-force attacks

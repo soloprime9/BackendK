@@ -668,31 +668,66 @@ router.get("/all-slugs", async (req, res) => {
 });
 
 
+let _sitemapAllIdsCache = { data: null, ts: 0 };
+const SITEMAP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 router.get("/all-ids", async (req, res) => {
-  const posts = await Post.find({}, "_id title description media mediaType mtype linkPreview.url linkPreview.title tags comments updatedAt createdAt")
-    .sort({ createdAt: -1 })
-    .lean(); // 🔥 newest first
+  try {
+    if (_sitemapAllIdsCache.data && Date.now() - _sitemapAllIdsCache.ts < SITEMAP_CACHE_TTL_MS) {
+      res.setHeader("Cache-Control", "public, max-age=300");
+      return res.json(_sitemapAllIdsCache.data);
+    }
 
-  const slim = posts.map((p) => ({
-    _id: p._id,
-    title: p.title || "",
-    ...(p.description ? { description: p.description } : {}),
-    media: p.media || "",
-    mediaType: p.mediaType || "",
-    mtype: p.mtype || "",
-    linkPreview: p.linkPreview?.url
-      ? {
-          url: p.linkPreview.url,
-          ...(p.linkPreview.title ? { title: p.linkPreview.title } : {}),
-        }
-      : undefined,
-    tags: Array.isArray(p.tags) ? p.tags : [],
-    commentCount: Array.isArray(p.comments) ? p.comments.length : 0,
-    updatedAt: p.updatedAt,
-    createdAt: p.createdAt,
-  }));
+    // Compute commentCount directly inside MongoDB so we never transfer massive comments arrays over the wire
+    const posts = await Post.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $project: {
+          _id: 1,
+          title: { $ifNull: ["$title", ""] },
+          description: 1,
+          media: { $ifNull: ["$media", ""] },
+          mediaType: { $ifNull: ["$mediaType", ""] },
+          mtype: { $ifNull: ["$mtype", ""] },
+          linkPreviewUrl: "$linkPreview.url",
+          linkPreviewTitle: "$linkPreview.title",
+          tags: { $ifNull: ["$tags", []] },
+          commentCount: {
+            $cond: [{ $isArray: "$comments" }, { $size: "$comments" }, 0],
+          },
+          updatedAt: 1,
+          createdAt: 1,
+        },
+      },
+    ]);
 
-  res.json(slim);
+    const slim = posts.map((p) => ({
+      _id: p._id,
+      title: p.title || "",
+      ...(p.description ? { description: p.description } : {}),
+      media: p.media || "",
+      mediaType: p.mediaType || "",
+      mtype: p.mtype || "",
+      ...(p.linkPreviewUrl
+        ? {
+            linkPreview: {
+              url: p.linkPreviewUrl,
+              ...(p.linkPreviewTitle ? { title: p.linkPreviewTitle } : {}),
+            },
+          }
+        : {}),
+      tags: Array.isArray(p.tags) ? p.tags : [],
+      commentCount: p.commentCount || 0,
+      updatedAt: p.updatedAt,
+      createdAt: p.createdAt,
+    }));
+
+    _sitemapAllIdsCache = { data: slim, ts: Date.now() };
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json(slim);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching post IDs", error: err.message });
+  }
 });
 
 // router.get("/:category/:slug", async (req, res) => {
@@ -3215,8 +3250,28 @@ router.get("/image/:id", async (req, res) => {
 
 
 
+let _sitemapVideosCache = { data: null, ts: 0 };
+
 router.get("/video/getall", async (req, res) => {
   try {
+    if (req.query.slim === "1") {
+      if (_sitemapVideosCache.data && Date.now() - _sitemapVideosCache.ts < SITEMAP_CACHE_TTL_MS) {
+        res.setHeader("Cache-Control", "public, max-age=300");
+        return res.status(200).json(_sitemapVideosCache.data);
+      }
+
+      const slimVideos = await Post.find(
+        { mediaType: { $regex: /^video/i } },
+        "_id title description media mediaUrl thumbnail mediaType duration tags createdAt updatedAt"
+      )
+        .sort({ _id: -1 })
+        .lean();
+
+      _sitemapVideosCache = { data: slimVideos, ts: Date.now() };
+      res.setHeader("Cache-Control", "public, max-age=300");
+      return res.status(200).json(slimVideos);
+    }
+
     const posts = await Post.find({
       mediaType: { $regex: /^video/i }
     })

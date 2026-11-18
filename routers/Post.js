@@ -2218,28 +2218,63 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
       ]
     };
 
-    // 2. Contextual Category Affinity (if selectedPost has a defined category)
+    // 2. Topic-First Affinity (specific hashtags + meaningful title keywords)
+    const GENERIC_STOPWORDS = new Set([
+      "viral", "viralvideo", "trending", "shorts", "short", "reels", "reel", "video", "videos",
+      "fondpeace", "fyp", "today", "latest", "episode", "full", "watch", "promo", "update",
+      "news", "hindi", "india", "indian", "official", "youtube", "channel", "with", "from",
+      "this", "that", "here", "what", "when", "where", "about", "after", "before", "your",
+      "mein", "kya", "hai", "hain", "aaj", "liye", "wala", "wali", "2024", "2025", "2026",
+    ]);
+    const escapeRx = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const specificTags = (Array.isArray(selectedPost.tags) ? selectedPost.tags : [])
+      .map((t) => String(t || "").replace(/^#+/, "").trim())
+      .filter((t) => t.length >= 3 && !GENERIC_STOPWORDS.has(t.toLowerCase()));
+
+    const titleWords = (selectedPost.title || "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/#[\w]+/g, "")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !GENERIC_STOPWORDS.has(w.toLowerCase()))
+      .slice(0, 5);
+
+    const topicOrClauses = [];
+    if (specificTags.length > 0) {
+      topicOrClauses.push({ tags: { $in: specificTags.map((t) => new RegExp(`^${escapeRx(t)}$`, "i")) } });
+    }
+    if (titleWords.length > 0) {
+      const kwPattern = titleWords.map((w) => `\\b${escapeRx(w)}`).join("|");
+      topicOrClauses.push({ title: { $regex: new RegExp(kwPattern, "i") } });
+    }
+
+    const playableVideoOr = [
+      { mediaType: { $regex: /video/i } },
+      { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
+      { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
+      { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } }
+    ];
+
+    const topicQuery =
+      topicOrClauses.length > 0
+        ? {
+            _id: { $ne: new mongoose.Types.ObjectId(id) },
+            $and: [{ $or: topicOrClauses }, { $or: playableVideoOr }],
+          }
+        : null;
+
+    // 3. Contextual Category Affinity (if selectedPost has a defined category)
     let categoryQuery = null;
     if (selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community") {
       categoryQuery = {
         _id: { $ne: new mongoose.Types.ObjectId(id) },
         category: selectedPost.category,
-        $or: [
-          { mediaType: { $regex: /video/i } },
-          { media: { $regex: /\.(mp4|mov|webm|mkv|m4v)$/i } },
-          { media: { $regex: /(?:youtube\.com|youtu\.be)/i } },
-          { "linkPreview.url": { $regex: /(?:youtube\.com|youtu\.be)/i } }
-        ]
+        $or: playableVideoOr,
       };
     }
 
-    // 3. Contextual Related Link Posts (matching category or content keywords)
-    const titleWords = (selectedPost.title || "")
-      .replace(/[^\w\s]/gi, "")
-      .split(/\s+/)
-      .filter((w) => w.length > 3)
-      .slice(0, 4);
-
+    // 4. Contextual Related Link Posts (matching category or content keywords)
     const linkCondition = {
       _id: { $ne: new mongoose.Types.ObjectId(id) },
       $or: [
@@ -2247,16 +2282,19 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
         { media: { $regex: /^https?:\/\//i } },
         { postType: "link" }
       ],
-      ...(selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
+      ...(titleWords.length > 0
+        ? { title: { $regex: new RegExp(titleWords.map((w) => `\\b${escapeRx(w)}`).join("|"), "i") } }
+        : selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
         ? { category: selectedPost.category }
-        : titleWords.length > 0
-        ? { title: { $regex: new RegExp(titleWords.join("|"), "i") } }
         : {})
     };
 
     const sortOptions = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
 
-    const [categoryRelated, contextualLinks, trendingNative, latestNative, youtubeRelated, randomNative] = await Promise.all([
+    const [topicRelated, categoryRelated, contextualLinks, trendingNative, latestNative, youtubeRelated, randomNative] = await Promise.all([
+      topicQuery
+        ? Post.find(topicQuery).sort({ createdAt: -1, views: -1 }).limit(10).populate("userId", userFields).lean()
+        : Promise.resolve([]),
       categoryQuery
         ? Post.find(categoryQuery).sort(sortOptions).limit(5).populate("userId", userFields).lean()
         : Promise.resolve([]),
@@ -2336,7 +2374,13 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
       return true;
     };
 
-    // Cadence: Category affinity -> Contextual Link Post -> Trending Video -> Contextual Link Post -> YouTube -> Random -> Latest
+    // Priority 1: Same-topic (matching tags/title keywords) up to 7 slots for strong topical relevance
+    for (const tp of (topicRelated || [])) {
+      if (blendedRelated.length >= 7) break;
+      tryAddRelated(tp);
+    }
+
+    // Priority 2: Cadence backfill (Category affinity -> Contextual Link -> Trending -> YouTube -> Random -> Latest)
     let cIdx = 0, lkIdx = 0, tIdx = 0, yIdx = 0, rIdx = 0, lIdx = 0;
     while (
       blendedRelated.length < 12 &&
@@ -2357,7 +2401,7 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
     }
 
     // Backfill if needed
-    for (const p of [...jitteredCategory, ...jitteredLinks, ...jitteredTrending, ...jitteredYt, ...jitteredRandom, ...jitteredLatest]) {
+    for (const p of [...(topicRelated || []), ...jitteredCategory, ...jitteredLinks, ...jitteredTrending, ...jitteredYt, ...jitteredRandom, ...jitteredLatest]) {
       if (blendedRelated.length >= 12) break;
       tryAddRelated(p);
     }
@@ -2722,7 +2766,42 @@ router.get("/image/:id", async (req, res) => {
     // Increment views passively
     await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
 
-    // 1. Contextual Affinity Candidates (matching category or tags)
+    // 1. Topic-First Affinity (specific hashtags + meaningful title keywords)
+    const GENERIC_STOPWORDS = new Set([
+      "viral", "viralvideo", "trending", "shorts", "short", "reels", "reel", "video", "videos",
+      "fondpeace", "fyp", "today", "latest", "episode", "full", "watch", "promo", "update",
+      "news", "hindi", "india", "indian", "official", "youtube", "channel", "with", "from",
+      "this", "that", "here", "what", "when", "where", "about", "after", "before", "your",
+      "mein", "kya", "hai", "hain", "aaj", "liye", "wala", "wali", "2024", "2025", "2026",
+    ]);
+    const escapeRx = (s) => String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const specificTags = (Array.isArray(selectedPost.tags) ? selectedPost.tags : [])
+      .map((t) => String(t || "").replace(/^#+/, "").trim())
+      .filter((t) => t.length >= 3 && !GENERIC_STOPWORDS.has(t.toLowerCase()));
+
+    const titleWords = (selectedPost.title || "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/#[\w]+/g, "")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !GENERIC_STOPWORDS.has(w.toLowerCase()))
+      .slice(0, 5);
+
+    const topicOrClauses = [];
+    if (specificTags.length > 0) {
+      topicOrClauses.push({ tags: { $in: specificTags.map((t) => new RegExp(`^${escapeRx(t)}$`, "i")) } });
+    }
+    if (titleWords.length > 0) {
+      const kwPattern = titleWords.map((w) => `\\b${escapeRx(w)}`).join("|");
+      topicOrClauses.push({ title: { $regex: new RegExp(kwPattern, "i") } });
+    }
+
+    const topicQuery =
+      topicOrClauses.length > 0
+        ? { _id: { $ne: currentPostId }, $or: topicOrClauses }
+        : null;
+
     let categoryQuery = null;
     if (selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community") {
       categoryQuery = {
@@ -2731,21 +2810,6 @@ router.get("/image/:id", async (req, res) => {
       };
     }
 
-    let tagQuery = null;
-    if (Array.isArray(selectedPost.tags) && selectedPost.tags.length > 0) {
-      tagQuery = {
-        _id: { $ne: currentPostId },
-        tags: { $in: selectedPost.tags },
-      };
-    }
-
-    // 2. Contextual Related Link Posts (matching category or content keywords)
-    const titleWords = (selectedPost.title || "")
-      .replace(/[^\w\s]/gi, "")
-      .split(/\s+/)
-      .filter((w) => w.length > 3)
-      .slice(0, 4);
-
     const linkCondition = {
       _id: { $ne: currentPostId },
       $or: [
@@ -2753,22 +2817,22 @@ router.get("/image/:id", async (req, res) => {
         { media: { $regex: /^https?:\/\//i } },
         { postType: "link" }
       ],
-      ...(selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
+      ...(titleWords.length > 0
+        ? { title: { $regex: new RegExp(titleWords.map((w) => `\\b${escapeRx(w)}`).join("|"), "i") } }
+        : selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
         ? { category: selectedPost.category }
-        : titleWords.length > 0
-        ? { title: { $regex: new RegExp(titleWords.join("|"), "i") } }
         : {})
     };
 
     const sortTrending = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
     const baseExclude = { _id: { $ne: currentPostId } };
 
-    const [categoryDocs, tagDocs, contextualLinks, trendingDocs, latestDocs] = await Promise.all([
+    const [topicDocs, categoryDocs, contextualLinks, trendingDocs, latestDocs] = await Promise.all([
+      topicQuery
+        ? Post.find(topicQuery).sort({ createdAt: -1, views: -1 }).limit(10).populate("userId", userFields).lean()
+        : Promise.resolve([]),
       categoryQuery
         ? Post.find(categoryQuery).sort(sortTrending).limit(8).populate("userId", userFields).lean()
-        : Promise.resolve([]),
-      tagQuery
-        ? Post.find(tagQuery).sort({ createdAt: -1 }).limit(6).populate("userId", userFields).lean()
         : Promise.resolve([]),
       Post.find(linkCondition).sort(sortTrending).limit(8).populate("userId", userFields).lean(),
       Post.find(baseExclude).sort(sortTrending).limit(10).populate("userId", userFields).lean(),
@@ -2787,7 +2851,6 @@ router.get("/image/:id", async (req, res) => {
     };
 
     const jCategory = jitterList(categoryDocs);
-    const jTags = jitterList(tagDocs);
     const jLinks = jitterList(contextualLinks);
     const jTrending = jitterList(trendingDocs);
     const jLatest = jitterList(latestDocs);
@@ -2812,22 +2875,26 @@ router.get("/image/:id", async (req, res) => {
       return true;
     };
 
-    // Cadence: Category affinity -> Contextual Link Post -> Tag affinity -> Trending -> Contextual Link Post -> Latest
-    let cI = 0, lkI = 0, tI = 0, trI = 0, lI = 0;
+    // Priority 1: Same-topic (matching tags/title keywords) up to 7 slots first
+    for (const tp of (topicDocs || [])) {
+      if (blendedRelated.length >= 7) break;
+      tryAdd(tp);
+    }
+
+    // Priority 2: Cadence backfill (Category -> Contextual Links -> Trending -> Latest)
+    let cI = 0, lkI = 0, trI = 0, lI = 0;
     while (
       blendedRelated.length < 10 &&
-      (cI < jCategory.length || lkI < jLinks.length || tI < jTags.length || trI < jTrending.length || lI < jLatest.length)
+      (cI < jCategory.length || lkI < jLinks.length || trI < jTrending.length || lI < jLatest.length)
     ) {
       if (cI < jCategory.length) tryAdd(jCategory[cI++]);
       if (lkI < jLinks.length) tryAdd(jLinks[lkI++]);
-      if (tI < jTags.length) tryAdd(jTags[tI++]);
       if (trI < jTrending.length) tryAdd(jTrending[trI++]);
-      if (lkI < jLinks.length) tryAdd(jLinks[lkI++]);
       if (lI < jLatest.length) tryAdd(jLatest[lI++]);
     }
 
     // Backfill if needed
-    for (const p of [...jCategory, ...jLinks, ...jTags, ...jTrending, ...jLatest]) {
+    for (const p of [...(topicDocs || []), ...jCategory, ...jLinks, ...jTrending, ...jLatest]) {
       if (blendedRelated.length >= 10) break;
       tryAdd(p);
     }

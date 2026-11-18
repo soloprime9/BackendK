@@ -191,7 +191,7 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
       return res.status(429).json({ message: "Slow down! You can only create up to 8 posts per minute." });
     }
 
-    const { title, media, mediaType, thumbnail, category, tags, poll, linkPreview, location } = req.body;
+    const { title, description, media, mediaType, thumbnail, category, tags, poll, linkPreview, location } = req.body;
 
     if (!title && !media && !poll && !linkPreview) {
       return res.status(400).json({ message: "Post must have text content, media, a link, or a poll" });
@@ -207,10 +207,11 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
     }
 
     const resolvedTitle = (title || finalLinkPreview?.title || "Shared Post").trim();
+    const resolvedDescription = typeof description === "string" ? description.trim() : "";
 
-    // Extract hashtags from title
+    // Extract hashtags from title and description
     const extractedTags = Array.isArray(tags) ? tags : [];
-    const titleTags = ((resolvedTitle || "").match(/#\w+/g) || []).map(t => t.replace("#", ""));
+    const titleTags = ((`${resolvedTitle} ${resolvedDescription}`).match(/#\w+/g) || []).map(t => t.replace("#", ""));
     const allTags = [...new Set([...extractedTags, ...titleTags])];
 
     // Generate slug
@@ -277,6 +278,7 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
     const newPost = new Post({
       userId,
       title: resolvedTitle,
+      description: resolvedDescription,
       slug,
       media: media || "",
       mediaType: finalMediaType,
@@ -667,13 +669,14 @@ router.get("/all-slugs", async (req, res) => {
 
 
 router.get("/all-ids", async (req, res) => {
-  const posts = await Post.find({}, "_id title media mediaType mtype linkPreview.url tags comments updatedAt createdAt")
+  const posts = await Post.find({}, "_id title description media mediaType mtype linkPreview.url tags comments updatedAt createdAt")
     .sort({ createdAt: -1 })
     .lean(); // 🔥 newest first
 
   const slim = posts.map((p) => ({
     _id: p._id,
     title: p.title || "",
+    ...(p.description ? { description: p.description } : {}),
     media: p.media || "",
     mediaType: p.mediaType || "",
     mtype: p.mtype || "",

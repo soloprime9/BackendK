@@ -19,6 +19,7 @@ const CommentSchema = new Schema({
 const PostSchema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: "User" },
   title: { type: String, default: "" },
+  description: { type: String, default: "" },
   slug: { type: String, unique: true, sparse: true },
   tags: [{ type: String, trim: true }],
   media: { type: String, default: "" },

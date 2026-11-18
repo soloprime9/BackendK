@@ -265,6 +265,7 @@ router.post("/confirm", verifyToken, async (req, res) => {
     }
     const {
       title,
+      description,
       category,
       tags,
       // video fields
@@ -321,6 +322,7 @@ router.post("/confirm", verifyToken, async (req, res) => {
     }
 
     const finalTitle = title?.trim() || (isVideo ? "Video" : isImage ? "Photo" : "Discussion");
+    const finalDescription = typeof description === "string" ? description.trim() : "";
 
     // Build slug (unique)
     let slug = generateSlug(finalTitle);
@@ -337,8 +339,8 @@ router.post("/confirm", verifyToken, async (req, res) => {
       ? tags.split(",").map((t) => t.trim()).filter(Boolean)
       : [];
 
-    // Pull hashtags out of title too
-    const titleTags = (finalTitle.match(/#\w+/g) || []).map((t) => t.replace("#", ""));
+    // Pull hashtags out of title and description too
+    const titleTags = ((`${finalTitle} ${finalDescription}`).match(/#\w+/g) || []).map((t) => t.replace("#", ""));
     const allTags = [...new Set([...extractedTags, ...titleTags])];
 
     const mediaUrl = isVideo ? (videoUrl || "") : (isImage ? (imageUrl || "") : "");
@@ -348,6 +350,7 @@ router.post("/confirm", verifyToken, async (req, res) => {
     const newPost = new Post({
       userId,
       title: finalTitle,
+      description: finalDescription,
       slug,
       category: category || "Entertainment",
       tags: allTags,

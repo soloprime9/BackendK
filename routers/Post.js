@@ -669,7 +669,7 @@ router.get("/all-slugs", async (req, res) => {
 
 
 router.get("/all-ids", async (req, res) => {
-  const posts = await Post.find({}, "_id title description media mediaType mtype linkPreview.url tags comments updatedAt createdAt")
+  const posts = await Post.find({}, "_id title description media mediaType mtype linkPreview.url linkPreview.title tags comments updatedAt createdAt")
     .sort({ createdAt: -1 })
     .lean(); // 🔥 newest first
 
@@ -680,7 +680,12 @@ router.get("/all-ids", async (req, res) => {
     media: p.media || "",
     mediaType: p.mediaType || "",
     mtype: p.mtype || "",
-    linkPreview: p.linkPreview?.url ? { url: p.linkPreview.url } : undefined,
+    linkPreview: p.linkPreview?.url
+      ? {
+          url: p.linkPreview.url,
+          ...(p.linkPreview.title ? { title: p.linkPreview.title } : {}),
+        }
+      : undefined,
     tags: Array.isArray(p.tags) ? p.tags : [],
     commentCount: Array.isArray(p.comments) ? p.comments.length : 0,
     updatedAt: p.updatedAt,

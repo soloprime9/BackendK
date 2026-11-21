@@ -93,88 +93,175 @@ function checkRateLimit(key, maxRequests = 10, windowMs = 60000) {
   return true;
 }
 
-// 🔗 OPENGRAPH LINK PREVIEW EXTRACTOR
+// 🔗 OPENGRAPH LINK PREVIEW EXTRACTOR (Universal Social & Web Card Scraper)
+function sanitizeLinkUrl(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  let clean = raw.trim();
+  if (!/^https?:\/\//i.test(clean)) {
+    clean = `https://${clean}`;
+  }
+  const match = clean.match(/https?:\/\/[^\s"'<>]+/i);
+  if (match) clean = match[0];
+  const nextHttp = clean.slice(8).search(/https?:\/\//i);
+  if (nextHttp > -1) {
+    clean = clean.slice(0, nextHttp + 8);
+  }
+  clean = clean.replace(/[\\]+$/, "");
+  return clean;
+}
+
+function decodeLinkHtmlEntities(str) {
+  if (!str || typeof str !== "string") return "";
+  return str
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(dec))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function slugToArticleTitle(pathname, hostname) {
+  const parts = pathname.split("/").filter((p) => Boolean(p) && !/^(news|p|post|article|story|status|posts)$/i.test(p));
+  if (parts.length === 0) {
+    const brand = hostname.replace(/^www\./i, "").split(".")[0];
+    return brand.charAt(0).toUpperCase() + brand.slice(1);
+  }
+  const lastPart = parts[parts.length - 1].replace(/\.(html?|php|aspx?)$/i, "");
+  const words = lastPart.replace(/[-_+]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+  if (words.length >= 3) return words;
+  const brand = hostname.replace(/^www\./i, "").split(".")[0];
+  return `${brand.charAt(0).toUpperCase() + brand.slice(1)} Article`;
+}
+
 async function extractOpenGraph(rawUrl) {
   try {
-    if (!rawUrl || typeof rawUrl !== "string") return null;
-    let validUrl = rawUrl.trim();
-    if (!/^https?:\/\//i.test(validUrl)) validUrl = `https://${validUrl}`;
+    const validUrl = sanitizeLinkUrl(rawUrl);
+    if (!validUrl) return null;
 
-    const parsedUrl = new URL(validUrl);
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(validUrl);
+    } catch (_) {
+      return null;
+    }
+
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const cleanHost = hostname.replace(/^www\./i, "");
 
     // 1. YouTube official oEmbed (instant, never blocked)
-    if (parsedUrl.hostname.includes("youtube.com") || parsedUrl.hostname.includes("youtu.be")) {
+    if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
       try {
         const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(validUrl)}&format=json`);
         if (oembedRes.ok) {
           const ytData = await oembedRes.json();
+          let vidId = null;
+          if (hostname.includes("youtu.be")) {
+            vidId = parsedUrl.pathname.slice(1).split(/[?&]/)[0];
+          } else {
+            vidId = parsedUrl.searchParams.get("v");
+          }
           return {
             url: validUrl,
-            title: ytData.title || "YouTube Video",
-            description: `Watch on YouTube • by ${ytData.author_name || "Creator"}`,
-            image: ytData.thumbnail_url || "",
+            title: decodeLinkHtmlEntities(ytData.title || "YouTube Video"),
+            description: decodeLinkHtmlEntities(`Watch on YouTube • by ${ytData.author_name || "Creator"}`),
+            image: ytData.thumbnail_url || (vidId ? `https://img.youtube.com/vi/${vidId}/hqdefault.jpg` : ""),
             siteName: "YouTube",
+            domain: "youtube.com",
             favicon: "https://www.youtube.com/favicon.ico"
           };
         }
       } catch (_) {}
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(validUrl, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-      }
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
+    // 2. Fetch page HTML using whitelisted social crawler User-Agents
+    let html = "";
+    const crawlerUas = [
+      "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+      "Twitterbot/1.0",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    ];
 
-    const html = await res.text();
-    const getMeta = (prop) => {
-      const regex = new RegExp(`<meta\\s+[^>]*?(?:property|name)=["'](?:og:|twitter:)?${prop}["'][^>]*?content=["']([^"']*)["']`, "i");
-      const altRegex = new RegExp(`<meta\\s+[^>]*?content=["']([^"']*)["'][^>]*?(?:property|name)=["'](?:og:|twitter:)?${prop}["']`, "i");
-      const match = html.match(regex) || html.match(altRegex);
-      return match ? match[1].trim() : "";
-    };
-
-    const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
-    const title = getMeta("title") || (titleMatch ? titleMatch[1].trim() : "");
-    const description = getMeta("description");
-    const image = getMeta("image");
-    const siteName = getMeta("site_name") || parsedUrl.hostname.replace(/^www\./, "");
-
-    const faviconMatch = html.match(/<link[^>]*rel=["'](?:shortcut )?icon["'][^>]*href=["']([^"']*)["']/i);
-    let favicon = faviconMatch ? faviconMatch[1] : "/favicon.ico";
-    if (favicon && !favicon.startsWith("http")) {
-      try { favicon = new URL(favicon, validUrl).href; } catch (_) {}
+    for (const ua of crawlerUas) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4500);
+        const res = await fetch(validUrl, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": ua,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9"
+          },
+          redirect: "follow"
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const text = await res.text();
+          if (text && text.length > 250) {
+            html = text;
+            break;
+          }
+        }
+      } catch (_) {}
     }
 
-    let finalImage = image;
-    // YouTube thumbnail fallback
-    if (!finalImage && (parsedUrl.hostname.includes("youtube.com") || parsedUrl.hostname.includes("youtu.be"))) {
-      let vidId = null;
-      if (parsedUrl.hostname.includes("youtu.be")) {
-        vidId = parsedUrl.pathname.slice(1).split(/[?&]/)[0];
-      } else {
-        vidId = parsedUrl.searchParams.get("v");
-      }
-      if (vidId) {
-        finalImage = `https://img.youtube.com/vi/${vidId}/hqdefault.jpg`;
-      }
+    let title = "";
+    let description = "";
+    let image = "";
+    let siteName = "";
+
+    if (html) {
+      const getMeta = (prop) => {
+        const regex = new RegExp(`<meta\\s+[^>]*?(?:property|name)=["'](?:og:|twitter:)?${prop}["'][^>]*?content=["']([^"']*)["']`, "i");
+        const altRegex = new RegExp(`<meta\\s+[^>]*?content=["']([^"']*)["'][^>]*?(?:property|name)=["'](?:og:|twitter:)?${prop}["']`, "i");
+        const match = html.match(regex) || html.match(altRegex);
+        return match ? match[1].trim() : "";
+      };
+
+      const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+      title = decodeLinkHtmlEntities(getMeta("title") || (titleMatch ? titleMatch[1].trim() : ""));
+      description = decodeLinkHtmlEntities(getMeta("description"));
+      image = getMeta("image") || getMeta("image:src");
+      siteName = decodeLinkHtmlEntities(getMeta("site_name"));
     }
 
-    if (!title && !description && !finalImage) return null;
+    // Smart fallbacks so no link preview ever fails
+    if (!siteName) {
+      const parts = cleanHost.split(".");
+      siteName = parts.length > 1 ? parts[parts.length - 2].toUpperCase() : cleanHost;
+    }
+
+    if (!title || /^(403 forbidden|just a moment|access denied|security check|attention required)/i.test(title)) {
+      title = slugToArticleTitle(parsedUrl.pathname, cleanHost);
+    }
+
+    if (!description) {
+      description = `View updates, articles, and content directly from ${cleanHost}.`;
+    }
+
+    // Resolve relative image URLs
+    if (image && !image.startsWith("http")) {
+      try {
+        image = new URL(image, validUrl).href;
+      } catch (_) {}
+    }
+
+    const favicon = `https://www.google.com/s2/favicons?domain=${cleanHost}&sz=128`;
 
     return {
       url: validUrl,
-      title: title.slice(0, 180),
-      description: description.slice(0, 250),
-      image: finalImage || "",
+      title: title.slice(0, 200),
+      description: description.slice(0, 300),
+      image: image || "",
       siteName,
-      favicon: favicon || ""
+      domain: cleanHost,
+      favicon
     };
   } catch (_) {
     return null;

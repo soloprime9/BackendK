@@ -215,10 +215,12 @@ async function extractOpenGraph(rawUrl) {
     let description = "";
     let image = "";
     let video = "";
+    let ogType = "";
     let siteName = "";
 
     // Check if the URL itself is a direct video file
-    if (/\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(validUrl)) {
+    const isDirectVideoFile = /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(validUrl);
+    if (isDirectVideoFile) {
       video = validUrl;
     }
 
@@ -234,8 +236,15 @@ async function extractOpenGraph(rawUrl) {
       title = decodeLinkHtmlEntities(getMeta("title") || (titleMatch ? titleMatch[1].trim() : ""));
       description = decodeLinkHtmlEntities(getMeta("description"));
       image = getMeta("image") || getMeta("image:src");
-      video = video || getMeta("video:secure_url") || getMeta("video:url") || getMeta("video") || getMeta("twitter:player:stream");
+      ogType = (getMeta("type") || "").toLowerCase();
       siteName = decodeLinkHtmlEntities(getMeta("site_name"));
+
+      // SAFETY GUARD: If page is an article, blog, or general website, NEVER capture an accidental sidebar ad video!
+      // Only capture video stream if the page itself is officially declared as a dedicated video post (og:type === 'video.*')
+      const isDedicatedVideoPage = /^video(\.|$)/i.test(ogType);
+      if (!video && isDedicatedVideoPage) {
+        video = getMeta("video:secure_url") || getMeta("video:url") || getMeta("video") || getMeta("twitter:player:stream");
+      }
     }
 
     // Smart fallbacks so no link preview ever fails
@@ -265,13 +274,16 @@ async function extractOpenGraph(rawUrl) {
     }
 
     const favicon = `https://www.google.com/s2/favicons?domain=${cleanHost}&sz=128`;
+    const isDedicatedVideo = isDirectVideoFile || /^video(\.|$)/i.test(ogType);
 
     return {
       url: validUrl,
       title: title.slice(0, 200),
       description: description.slice(0, 300),
       image: image || "",
-      video: video || "",
+      video: isDedicatedVideo ? (video || "") : "",
+      isDedicatedVideo,
+      ogType: ogType || "website",
       siteName,
       domain: cleanHost,
       favicon

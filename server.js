@@ -18,6 +18,7 @@ const reminderRoutes = require("./routers/reminder");
 const notificationRoutes = require("./routers/notification");
 const chatRoutes = require("./routers/chat");
 const storeRoutes = require("./routers/store");
+const fondpeaceRoutes = require("./routers/fondpeace");
 
 
 const compression = require("compression");
@@ -88,6 +89,7 @@ app.use("/reminder", reminderRoutes);
 app.use("/notification", notificationRoutes);
 app.use("/chat", chatRoutes);
 app.use("/store", storeRoutes);
+app.use("/fondpeace", fondpeaceRoutes);
 
 
 // ================= START SERVER =================

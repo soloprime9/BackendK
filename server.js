@@ -24,12 +24,12 @@ const fondpeaceRoutes = require("./routers/fondpeace");
 const compression = require("compression");
 
 const app = express();
-const server = http.createServer(app);
-
-// ✅ INIT SOCKET
-const io = initSocket(server);
+const isVercel = Boolean(process.env.VERCEL);
 
 app.set("trust proxy", 1);
+
+// Ensure MongoDB connection is established before handling API routes
+const mongooseConnection = require("./connection");
 
 // ================= MIDDLEWARE =================
 
@@ -49,7 +49,8 @@ app.use(cors({
       origin.includes("localhost") ||
       origin.includes("127.0.0.1") ||
       origin.includes("vercel.app") ||
-      origin.includes("fondpeace.com")
+      origin.includes("fondpeace.com") ||
+      origin.includes("falconspido.com")
     ) {
       return callback(null, true);
     }
@@ -63,11 +64,26 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.get("/", (req, res) => {
-  res.send("Backend Running 🚀");
+  res.json({ ok: true, success: true, service: "Backend Running 🚀" });
 });
 
 app.get("/health", (req, res) => {
-  res.status(200).json({ ok: true, service: "fondpeace-backend", ts: Date.now() });
+  res.status(200).json({ ok: true, success: true, service: "fondpeace-backend", ts: Date.now() });
+});
+
+app.use(async (req, res, next) => {
+  try {
+    if (typeof mongooseConnection.ensureConnected === "function") {
+      await mongooseConnection.ensureConnected();
+    }
+    return next();
+  } catch (err) {
+    return res.status(503).json({
+      success: false,
+      message: "Database connection unavailable",
+      error: err.message
+    });
+  }
 });
 
 const { authLimiter } = require("./middleware/rateLimiter");
@@ -94,22 +110,26 @@ app.use("/fondpeace", fondpeaceRoutes);
 
 // ================= START SERVER =================
 
-const PORT = process.env.PORT || 4000;
+if (!isVercel && require.main === module) {
+  const server = http.createServer(app);
+  initSocket(server);
+  const PORT = process.env.PORT || 4000;
 
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on ${PORT}`);
+  server.listen(PORT, () => {
+    console.log(`🚀 Server running on ${PORT}`);
 
-  // Free-Tier Keep-Alive Heartbeat: Self-pings every 12 minutes to prevent Render spin-down
-  const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || "https://backendk-z915.onrender.com";
-  setInterval(() => {
-    try {
-      const client = keepAliveUrl.startsWith("https") ? require("https") : http;
-      client.get(keepAliveUrl, (res) => {
-        // Heartbeat successful, keeping node process awake
-      }).on("error", () => {});
-    } catch (_) {}
-  }, 12 * 60 * 1000);
-});
+    // Free-Tier Keep-Alive Heartbeat: Self-pings every 12 minutes to prevent Render spin-down
+    const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || "https://backendk-z915.onrender.com";
+    setInterval(() => {
+      try {
+        const client = keepAliveUrl.startsWith("https") ? require("https") : http;
+        client.get(keepAliveUrl, () => {}).on("error", () => {});
+      } catch (_) {}
+    }, 12 * 60 * 1000);
+  });
+}
+
+module.exports = app;
 
 
 

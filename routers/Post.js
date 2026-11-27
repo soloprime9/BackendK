@@ -11,8 +11,10 @@ const PostAnalytics = require("../models/PostAnalytics");
 const { recordActivity } = require("../utils/telemetry");
 
 const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-ffmpeg.setFfmpegPath(ffmpegPath);
+try {
+  const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+  if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
+} catch (_) {}
 
 const { getIO } = require("../socket");
 const verifyToken = require("../middleware/verifyToken");
@@ -28,7 +30,7 @@ function emitRealtimeEvent(event, data) {
   try {
     const io = getIO();
     if (io) io.emit(event, data);
-  } catch (_) {}
+  } catch (_) { }
 }
 
 // Helper: Extract authenticated userId from token headers if present
@@ -137,6 +139,82 @@ function slugToArticleTitle(pathname, hostname) {
   return `${brand.charAt(0).toUpperCase() + brand.slice(1)} Article`;
 }
 
+// Universal RSS Feed Extractor: Fallback for Cloudflare-protected news & blogs (e.g. Tellyexpress, Bollywood Life, WordPress)
+async function findInRssFeed(validUrl, parsedUrl) {
+  try {
+    const baseUrl = `${parsedUrl.protocol}//${parsedUrl.hostname}`;
+    const slug = parsedUrl.pathname.replace(/^\/+|\/+$/g, "").split("/").pop().toLowerCase();
+    const cleanTarget = validUrl.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+
+    const pages = [1, 2, 3, 4, 5];
+    const fetchPage = async (p) => {
+      try {
+        const u = p === 1 ? `${baseUrl}/feed/` : `${baseUrl}/feed/?paged=${p}`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(u, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/rss+xml,application/xml,text/xml,*/*",
+          },
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const text = await res.text();
+          if (text && text.includes("<item>")) return text;
+        }
+      } catch (_) { }
+      return "";
+    };
+
+    const results = await Promise.all(pages.map((p) => fetchPage(p)));
+
+    for (let pIdx = 0; pIdx < results.length; pIdx++) {
+      const xml = results[pIdx];
+      if (!xml) continue;
+
+      const items = xml.split("<item>");
+      for (let i = 1; i < items.length; i++) {
+        const it = items[i];
+        const linkMatch = it.match(/<link>(.*?)<\/link>/i);
+        if (!linkMatch) continue;
+
+        const itemLink = linkMatch[1].trim();
+        const cleanItem = itemLink.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+        const itemSlug = cleanItem.split("/").pop().toLowerCase();
+
+        const isMatch =
+          cleanItem === cleanTarget ||
+          cleanTarget.includes(cleanItem) ||
+          cleanItem.includes(cleanTarget) ||
+          (slug && itemSlug && (slug.includes(itemSlug) || itemSlug.includes(slug)));
+
+        if (isMatch) {
+          const titleMatch = it.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/i);
+          const descMatch = it.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i);
+          const imgMatch =
+            it.match(/<media:content[^>]+url=["']([^"']+)["']/i) ||
+            it.match(/<enclosure[^>]+url=["']([^"']+)["']/i) ||
+            it.match(/<img[^>]+src=["']([^"']+)["']/i);
+
+          const rawTitle = titleMatch ? titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : "";
+          let rawDesc = descMatch ? descMatch[1].replace(/<[^>]+>/g, "").replace(/<!\[CDATA\[|\]\]>/g, "").trim() : "";
+          rawDesc = rawDesc.replace(/The post\s+[\s\S]*?appeared first on[\s\S]*$/i, "").trim();
+          const image = imgMatch ? imgMatch[1].trim() : "";
+
+          return {
+            title: decodeLinkHtmlEntities(rawTitle),
+            description: decodeLinkHtmlEntities(rawDesc),
+            image,
+          };
+        }
+      }
+    }
+  } catch (_) { }
+  return null;
+}
+
 async function extractOpenGraph(rawUrl) {
   try {
     const validUrl = sanitizeLinkUrl(rawUrl);
@@ -174,7 +252,7 @@ async function extractOpenGraph(rawUrl) {
             favicon: "https://www.youtube.com/favicon.ico"
           };
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 2. Fetch page HTML using whitelisted social crawler User-Agents
@@ -206,7 +284,7 @@ async function extractOpenGraph(rawUrl) {
             break;
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     let title = "";
@@ -249,7 +327,7 @@ async function extractOpenGraph(rawUrl) {
       if ((cleanHost.includes("x.com") || cleanHost.includes("twitter.com")) && titleMatch) {
         const rawTitle = decodeLinkHtmlEntities(titleMatch[1]);
         const tweetMatch = rawTitle.match(/on X:\s*["“]([\s\S]+?)["”]\s*\/\s*X/i) ||
-                           rawTitle.match(/on Twitter:\s*["“]([\s\S]+?)["”]\s*\/\s*Twitter/i);
+          rawTitle.match(/on Twitter:\s*["“]([\s\S]+?)["”]\s*\/\s*Twitter/i);
         if (tweetMatch && tweetMatch[1]) {
           description = tweetMatch[1].trim();
         }
@@ -289,12 +367,12 @@ async function extractOpenGraph(rawUrl) {
     if (image && !image.startsWith("http")) {
       try {
         image = new URL(image, validUrl).href;
-      } catch (_) {}
+      } catch (_) { }
     }
     if (video && !video.startsWith("http")) {
       try {
         video = new URL(video, validUrl).href;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     const favicon = `https://www.google.com/s2/favicons?domain=${cleanHost}&sz=128`;
@@ -483,7 +561,7 @@ router.post(["/create", "/add"], verifyToken, async (req, res) => {
         category: saved.category || "general",
       },
       source: "content_creation",
-    }).catch(() => {});
+    }).catch(() => { });
 
     return res.status(201).json(populated);
   } catch (error) {
@@ -574,12 +652,12 @@ router.get("/related/mango/getall", async (req, res) => {
         .lean(),
       categoryCondition
         ? Post.find(categoryCondition)
-            .sort(sortOptions)
-            .skip(skip)
-            .limit(categoryQuota)
-            .populate(populateConfig[0])
-            .populate(populateConfig[1])
-            .lean()
+          .sort(sortOptions)
+          .skip(skip)
+          .limit(categoryQuota)
+          .populate(populateConfig[0])
+          .populate(populateConfig[1])
+          .lean()
         : Promise.resolve([]),
       Post.find(contextualLinkCondition)
         .sort(sortOptions)
@@ -846,11 +924,11 @@ router.get("/all-ids", async (req, res) => {
       mtype: p.mtype || "",
       ...(p.linkPreviewUrl
         ? {
-            linkPreview: {
-              url: p.linkPreviewUrl,
-              ...(p.linkPreviewTitle ? { title: p.linkPreviewTitle } : {}),
-            },
-          }
+          linkPreview: {
+            url: p.linkPreviewUrl,
+            ...(p.linkPreviewTitle ? { title: p.linkPreviewTitle } : {}),
+          },
+        }
         : {}),
       tags: Array.isArray(p.tags) ? p.tags : [],
       commentCount: p.commentCount || 0,
@@ -1452,14 +1530,14 @@ router.get("/mango/getall", async (req, res) => {
 
       if (startWithVideo) {
         // Slot 1: Video Reel
-        while (vIdx < allVideos.length && !tryAdd(allVideos[vIdx++])) {}
+        while (vIdx < allVideos.length && !tryAdd(allVideos[vIdx++])) { }
         // Slot 2: Photo or Discussion
-        while (nvIdx < allNonVideos.length && !tryAdd(allNonVideos[nvIdx++])) {}
+        while (nvIdx < allNonVideos.length && !tryAdd(allNonVideos[nvIdx++])) { }
       } else {
         // Slot 1: Photo, Discussion, or Latest Story
-        while (nvIdx < allNonVideos.length && !tryAdd(allNonVideos[nvIdx++])) {}
+        while (nvIdx < allNonVideos.length && !tryAdd(allNonVideos[nvIdx++])) { }
         // Slot 2: Video Reel (Guaranteed right at the top!)
-        while (vIdx < allVideos.length && !tryAdd(allVideos[vIdx++])) {}
+        while (vIdx < allVideos.length && !tryAdd(allVideos[vIdx++])) { }
       }
 
       // Smooth rhythmic alternation for remaining slots
@@ -1738,12 +1816,12 @@ router.delete("/delete/:postId", verifyToken, async (req, res) => {
 
     // 6. Cascade cleanup across user collections & analytics
     if (postAuthorId) {
-      await User.findByIdAndUpdate(postAuthorId, { $pull: { posts: postId } }).catch(() => {});
+      await User.findByIdAndUpdate(postAuthorId, { $pull: { posts: postId } }).catch(() => { });
     }
-    await User.updateMany({ bookmarks: postId }, { $pull: { bookmarks: postId } }).catch(() => {});
-    await User.updateMany({ "watchedShorts.postId": postId }, { $pull: { watchedShorts: { postId } } }).catch(() => {});
-    await PostAnalytics.deleteMany({ postId }).catch(() => {});
-    await Notification.deleteMany({ postId }).catch(() => {});
+    await User.updateMany({ bookmarks: postId }, { $pull: { bookmarks: postId } }).catch(() => { });
+    await User.updateMany({ "watchedShorts.postId": postId }, { $pull: { watchedShorts: { postId } } }).catch(() => { });
+    await PostAnalytics.deleteMany({ postId }).catch(() => { });
+    await Notification.deleteMany({ postId }).catch(() => { });
 
     // 7. Emit realtime event for connected clients to remove card from feed
     emitRealtimeEvent("post_deleted", { postId });
@@ -2430,9 +2508,9 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
     const topicQuery =
       topicOrClauses.length > 0
         ? {
-            _id: { $ne: new mongoose.Types.ObjectId(id) },
-            $and: [{ $or: topicOrClauses }, { $or: playableVideoOr }],
-          }
+          _id: { $ne: new mongoose.Types.ObjectId(id) },
+          $and: [{ $or: topicOrClauses }, { $or: playableVideoOr }],
+        }
         : null;
 
     // 3. Contextual Category Affinity (if selectedPost has a defined category)
@@ -2456,8 +2534,8 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
       ...(titleWords.length > 0
         ? { title: { $regex: new RegExp(titleWords.map((w) => `\\b${escapeRx(w)}`).join("|"), "i") } }
         : selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
-        ? { category: selectedPost.category }
-        : {})
+          ? { category: selectedPost.category }
+          : {})
     };
 
     const sortOptions = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
@@ -2602,6 +2680,7 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
 
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.status(200).json({
+      success: true,
       post: normalizedPost,
       related: finalPosts,
       relatedIds: finalPosts.map((p) => p._id)
@@ -2620,7 +2699,7 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
 //     const selectedPost = await Post.findById(id)
 //       .populate("userId", "username")
 //       .populate("comments.userId", "username profilePicture");
-    
+
 //     if (!selectedPost) {
 //       return res.status(404).json({ message: "Post not found" });
 //     }
@@ -2720,7 +2799,7 @@ router.get(["/single/:id", "/short/:id"], async (req, res) => {
 //       })
 //       .sort({ createdAt: -1 })
 //       .limit(10 - relatedPosts.length);
-      
+
 //       relatedPosts = [...relatedPosts, ...extraPosts];
 //     }
 
@@ -2991,8 +3070,8 @@ router.get("/image/:id", async (req, res) => {
       ...(titleWords.length > 0
         ? { title: { $regex: new RegExp(titleWords.map((w) => `\\b${escapeRx(w)}`).join("|"), "i") } }
         : selectedPost.category && selectedPost.category !== "All" && selectedPost.category !== "Community"
-        ? { category: selectedPost.category }
-        : {})
+          ? { category: selectedPost.category }
+          : {})
     };
 
     const sortTrending = { isPinned: -1, trendingScore: -1, views: -1, createdAt: -1 };
@@ -3323,7 +3402,7 @@ router.get("/image/:id", async (req, res) => {
 
 //     let relatedPosts = await Post.find({
 //       _id: { $ne: id },
-      
+
 //       ...tagFilter,
 //       ...(titleFilter.$or ? { $or: titleFilter.$or } : {}),
 //     })
@@ -3339,7 +3418,7 @@ router.get("/image/:id", async (req, res) => {
 //     if (relatedPosts.length === 0) {
 //       relatedPosts = await Post.find({
 //         _id: { $ne: id }
-        
+
 //       })
 //         .populate("userId", "username")
 //         .sort({ createdAt: -1 })
@@ -4146,7 +4225,7 @@ router.get("/analytics/:postId", async (req, res) => {
     }
 
     const totalInteractions = likesCount + commentsCount + repostsCount + bookmarksCount + pollVotes;
-    const engagementRate = views > 0 
+    const engagementRate = views > 0
       ? `${((totalInteractions / views) * 100).toFixed(2)}%`
       : (totalInteractions > 0 ? "100.00%" : "0.00%");
 

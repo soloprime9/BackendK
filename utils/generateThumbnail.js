@@ -1,19 +1,23 @@
 const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
 
-// 🔥 IMPORTANT: set ffmpeg path (missing in your code)
-ffmpeg.setFfmpegPath(ffmpegPath);
+let hasFfmpeg = false;
+try {
+  const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+  if (ffmpegPath) {
+    ffmpeg.setFfmpegPath(ffmpegPath);
+    hasFfmpeg = true;
+  }
+} catch (_) {}
 
 function generateThumbnail(tempFilePath, thumbFileName) {
   const outputPath = path.join(os.tmpdir(), thumbFileName);
 
   return new Promise((resolve) => {
-    // ❌ अगर file exist नहीं है → fail safe
-    if (!fs.existsSync(tempFilePath)) {
-      console.log("❌ Input file not found:", tempFilePath);
+    if (!hasFfmpeg || !fs.existsSync(tempFilePath)) {
+      if (!fs.existsSync(tempFilePath)) console.log("❌ Input file not found:", tempFilePath);
       return resolve(null);
     }
 

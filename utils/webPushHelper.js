@@ -1,14 +1,21 @@
-const webpush = require("web-push");
 const PushSubscription = require("../models/PushSubscription");
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "BB5Q16oeAgiqmWG_sNfGlwqkZ9wtRQyOhQFykrPozxNzeSw6jIHJ_7052G3oVV_RZlueBftUzWp86WZpk4AP3gA";
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "OHtBXoyAlOL7cmDIin0tENkTdeqqwS4zXF_i6Chwohc";
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:support@fondpeace.com";
 
-try {
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-} catch (err) {
-  console.warn("VAPID setup warning:", err.message);
+let _webpushInstance = null;
+async function getWebPush() {
+  if (_webpushInstance) return _webpushInstance;
+  const mod = await import("web-push");
+  const wp = mod.default || mod;
+  try {
+    wp.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  } catch (err) {
+    console.warn("VAPID setup warning:", err.message);
+  }
+  _webpushInstance = wp;
+  return wp;
 }
 
 function getPublicKey() {
@@ -62,6 +69,7 @@ async function sendPushToUser(userId, payload) {
       return { success: true, sent: 0, reason: "No active push subscriptions" };
     }
 
+    const webpush = await getWebPush();
     const payloadString = typeof payload === "string" ? payload : JSON.stringify(payload);
     let sentCount = 0;
 
@@ -107,6 +115,7 @@ async function broadcastPush(payload, { isGuestOnly = false, limit = 500 } = {})
       .sort({ lastActive: -1 })
       .limit(limit);
 
+    const webpush = await getWebPush();
     const payloadString = typeof payload === "string" ? payload : JSON.stringify(payload);
     let sentCount = 0;
 
